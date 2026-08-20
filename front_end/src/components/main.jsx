@@ -78,7 +78,7 @@ export default function Main() {
             <h1 style={{ textAlign: "center", width: "100%" }}>
                 ESP32 Monitoring
             </h1>
-            <NodeList nodeType="esp32" />
+            <NodeList nodeType="esp32" testMode={testMode} />
 
             <div className="main">
                 <SystemControl testMode={testMode} />
