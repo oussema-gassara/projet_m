@@ -39,3 +39,30 @@ export const fakeNetwork = {
     mac_address: "1C:69:20:95:89:38",
     hostname: "ESP32-Monitor",
 };
+
+export const fakeNodes = [
+    {
+        id: "fake-esp32-1",
+        node_name: "esp32-1",
+        node_type: "esp32",
+        added_at: new Date().toISOString(),
+    },
+    {
+        id: "fake-esp32-2",
+        node_name: "esp32-2",
+        node_type: "esp32",
+        added_at: new Date().toISOString(),
+    },
+    {
+        id: "fake-esp32-3",
+        node_name: "esp32-3",
+        node_type: "esp32",
+        added_at: new Date().toISOString(),
+    },
+    {
+        id: "fake-pi-1",
+        node_name: "raspberry-pi-1",
+        node_type: "raspberry",
+        added_at: new Date().toISOString(),
+    },
+];
