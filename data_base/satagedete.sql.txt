@@ -1,0 +1,127 @@
+CREATE TABLE monitoring_data (
+
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    -- Temperatures
+    cpu_temperature FLOAT,
+    external_temperature FLOAT,
+
+    -- Sensors
+    humidity FLOAT,
+    gas_level INT,
+    gas_alarm BOOLEAN,
+
+    -- Memory
+    total_ram INT,
+    free_ram INT,
+    used_ram INT,
+    minimum_free_ram INT,
+
+    -- CPU
+    cpu_frequency INT,
+    cpu_cores INT,
+    active_core INT,
+
+    -- Network
+    wifi_signal INT,
+    wifi_status VARCHAR(20),
+
+    ip_address VARCHAR(20),
+    gateway VARCHAR(20),
+    subnet VARCHAR(20),
+    dns VARCHAR(20),
+
+    mac_address VARCHAR(25),
+    hostname VARCHAR(50),
+
+    -- ESP32 information
+    chip_model VARCHAR(30),
+    chip_revision INT,
+
+    flash_size INT,
+    sketch_size INT,
+    free_sketch INT,
+
+    sdk_version VARCHAR(50),
+
+    -- Runtime
+    uptime BIGINT,
+    reconnects INT,
+
+    -- Status
+    status VARCHAR(20),
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+);
+CREATE TABLE danger_history (
+
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    monitoring_id INT,
+
+    danger_type VARCHAR(50) NOT NULL,
+
+    severity VARCHAR(20) NOT NULL,
+
+    sensor_value FLOAT,
+
+    threshold_value FLOAT,
+
+    description TEXT,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (monitoring_id)
+        REFERENCES monitoring_data(id)
+        ON DELETE SET NULL
+
+);
+CREATE TABLE network_history (
+
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    monitoring_id INT,
+
+    wifi_signal INT,
+
+    wifi_status VARCHAR(20),
+
+    ip_address VARCHAR(20),
+
+    gateway VARCHAR(20),
+
+    subnet VARCHAR(20),
+
+    dns VARCHAR(20),
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (monitoring_id)
+        REFERENCES monitoring_data(id)
+        ON DELETE SET NULL
+
+);
+CREATE TABLE system_events (
+
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    event_type VARCHAR(50),
+
+    description TEXT,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+);
+SELECT 
+    wifi_signal,
+    wifi_status,
+    ip_address,
+    gateway,
+    subnet,
+    dns,
+    mac_address,
+    hostname
+FROM monitoring_data
+ORDER BY id DESC
+LIMIT 5;

@@ -1,0 +1,476 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <esp_system.h>
+#include <esp_spi_flash.h>
+
+// ======================================================
+//                  STRESS TEST TOGGLE
+// ======================================================
+// Uncomment the line below to enable CPU/RAM stress testing.
+// Useful for validating your AI detection thresholds on real hardware.
+
+// #define STRESS_TEST_ENABLED
+
+// ======================================================
+//                    WIFI SETTINGS
+// ======================================================
+
+const char* ssid = "TOPNET_2951";
+const char* password = "WMAWE9AM8S67";
+String serverURL = "http://192.168.100.3:3000/api/data";
+/*const char* ssid = "RECHERCHES";
+const char* password = "rch*$crnsfax";
+String serverURL = "http://10.1.30.21:3000/api/data";*/
+// ======================================================
+//                    SENSOR PINS
+// ======================================================
+
+// LM35DZ
+#define LM35_PIN 34
+
+// MQ-2
+#define MQ2_ANALOG_PIN 35
+#define MQ2_DIGITAL_PIN 27
+
+// HR202
+#define HR202_PIN 32
+
+// Status LED
+#define LED_PIN 2
+
+// ======================================================
+//                 TIMING VARIABLES
+// ======================================================
+
+unsigned long lastSend = 0;
+const unsigned long sendInterval = 5000;
+
+// Count WiFi reconnects
+unsigned long reconnectCount = 0;
+
+// Last HTTP response
+int lastHTTPResponse = 0;
+
+// ======================================================
+//              FUNCTION DECLARATIONS
+// ======================================================
+
+void connectWiFi();
+void reconnectWiFi();
+void sendData();
+
+#ifdef STRESS_TEST_ENABLED
+void stressCPU(unsigned long durationMs);
+void stressRAM();
+#endif
+
+// ======================================================
+//                      SETUP
+// ======================================================
+
+void setup()
+{
+    Serial.begin(115200);
+
+    pinMode(MQ2_DIGITAL_PIN, INPUT);
+    pinMode(HR202_PIN, INPUT);
+    pinMode(LED_PIN, OUTPUT);
+
+    digitalWrite(LED_PIN, LOW);
+
+    analogReadResolution(12);
+
+    WiFi.setHostname("ESP32-Monitor");
+
+    connectWiFi();
+
+    #ifdef STRESS_TEST_ENABLED
+    Serial.println("!!! STRESS TEST MODE ENABLED !!!");
+    #endif
+}
+
+// ======================================================
+//                  WIFI CONNECTION
+// ======================================================
+
+void connectWiFi()
+{
+    Serial.println();
+    Serial.println("==============================");
+    Serial.println("Connecting to WiFi...");
+    Serial.println("==============================");
+
+    WiFi.begin(ssid, password);
+
+    int attempts = 0;
+
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        delay(500);
+        Serial.print(".");
+
+        attempts++;
+
+        if (attempts > 40)
+        {
+            Serial.println();
+            Serial.println("Restarting WiFi...");
+            WiFi.disconnect();
+            WiFi.begin(ssid, password);
+            attempts = 0;
+        }
+    }
+
+    Serial.println();
+    Serial.println("WiFi Connected");
+    Serial.print("IP Address : ");
+    Serial.println(WiFi.localIP());
+
+    Serial.print("Gateway    : ");
+    Serial.println(WiFi.gatewayIP());
+
+    Serial.print("Subnet     : ");
+    Serial.println(WiFi.subnetMask());
+
+    Serial.print("DNS        : ");
+    Serial.println(WiFi.dnsIP());
+
+    Serial.print("MAC        : ");
+    Serial.println(WiFi.macAddress());
+
+    Serial.print("Hostname   : ");
+    Serial.println(WiFi.getHostname());
+
+    Serial.println("==============================");
+}
+
+// ======================================================
+//            AUTOMATIC WIFI RECONNECTION
+// ======================================================
+
+void reconnectWiFi()
+{
+    if (WiFi.status() == WL_CONNECTED)
+        return;
+
+    reconnectCount++;
+
+    Serial.println();
+    Serial.println("WiFi Lost...");
+    Serial.println("Reconnecting...");
+
+    WiFi.disconnect();
+
+    WiFi.begin(ssid, password);
+
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        delay(500);
+        Serial.print(".");
+    }
+
+    Serial.println();
+    Serial.println("WiFi Reconnected");
+}
+
+// ======================================================
+//                  STRESS TEST FUNCTIONS
+// ======================================================
+
+#ifdef STRESS_TEST_ENABLED
+
+void stressCPU(unsigned long durationMs)
+{
+    Serial.println(">>> Stressing CPU...");
+    unsigned long start = millis();
+    volatile double x = 1.0;
+    while (millis() - start < durationMs)
+    {
+        x += sin(x) * cos(x);
+    }
+    Serial.println(">>> CPU stress complete.");
+}
+
+void stressRAM()
+{
+    Serial.println(">>> Stressing RAM...");
+
+    const int chunkSize = 1024;
+    const int numChunks = 50;  // increase to allocate more, decrease to allocate less
+
+    void* chunks[numChunks];
+
+    for (int i = 0; i < numChunks; i++)
+    {
+        chunks[i] = malloc(chunkSize);
+        if (chunks[i] != NULL)
+        {
+            memset(chunks[i], 0xFF, chunkSize);
+        }
+        delay(50);
+    }
+
+    Serial.print("Free heap during stress: ");
+    Serial.println(ESP.getFreeHeap());
+
+    delay(3000);  // hold allocation so it's visible in the next sendData() cycle
+
+    for (int i = 0; i < numChunks; i++)
+    {
+        if (chunks[i] != NULL) free(chunks[i]);
+    }
+
+    Serial.println(">>> RAM stress complete, memory freed.");
+}
+
+#endif
+
+// ======================================================
+//              SENSOR + ESP32 DATA COLLECTION
+// ======================================================
+
+void sendData()
+{
+    reconnectWiFi();
+
+    #ifdef STRESS_TEST_ENABLED
+    stressCPU(2000);   // busy-loop the CPU for 2 seconds
+    stressRAM();       // temporarily eat RAM before reading heap stats
+    #endif
+
+    // --------------------------------------------------
+    // LM35
+    // --------------------------------------------------
+
+    int lm35Raw = analogRead(LM35_PIN);
+
+    float voltage = (lm35Raw * 3.3) / 4095.0;
+
+    float externalTemperature = voltage * 100.0;
+
+    // --------------------------------------------------
+    // MQ2
+    // --------------------------------------------------
+
+    int gasAnalog = analogRead(MQ2_ANALOG_PIN);
+
+    int gasDigital = digitalRead(MQ2_DIGITAL_PIN);
+
+    // --------------------------------------------------
+    // HR202
+    // --------------------------------------------------
+
+    int humidityState = digitalRead(HR202_PIN);
+
+    // --------------------------------------------------
+    // ESP32 INFORMATION
+    // --------------------------------------------------
+
+    float cpuTemperature = temperatureRead();
+
+    uint32_t totalRAM = ESP.getHeapSize();
+
+    uint32_t freeRAM = ESP.getFreeHeap();
+
+    uint32_t usedRAM = totalRAM - freeRAM;
+
+    uint32_t minFreeRAM = ESP.getMinFreeHeap();
+
+    int cpuFrequency = getCpuFrequencyMhz();
+
+    int cpuCores = ESP.getChipCores();
+
+    int activeCore = xPortGetCoreID();
+
+    uint32_t flashSize = ESP.getFlashChipSize();
+
+    uint32_t sketchSize = ESP.getSketchSize();
+
+    uint32_t freeSketch = ESP.getFreeSketchSpace();
+
+    uint32_t chipRevision = ESP.getChipRevision();
+
+    String chipModel = ESP.getChipModel();
+
+    String sdkVersion = ESP.getSdkVersion();
+
+    uint32_t uptime = millis() / 1000;
+
+    // --------------------------------------------------
+    // NETWORK INFORMATION
+    // --------------------------------------------------
+
+    String ipAddress = WiFi.localIP().toString();
+
+    String gateway = WiFi.gatewayIP().toString();
+
+    String subnet = WiFi.subnetMask().toString();
+
+    String dns = WiFi.dnsIP().toString();
+
+    String macAddress = WiFi.macAddress();
+
+    String hostname = WiFi.getHostname();
+
+    int wifiRSSI = WiFi.RSSI();
+
+    String wifiStatus =
+        (WiFi.status() == WL_CONNECTED)
+        ? "Connected"
+        : "Disconnected";
+
+    // --------------------------------------------------
+    // STATUS
+    // --------------------------------------------------
+
+    String status = "NORMAL";
+
+    if (
+        gasAnalog > 2500 ||
+        freeRAM < 80000 ||
+        externalTemperature > 50
+    )
+    {
+        status = "DANGER";
+
+        digitalWrite(LED_PIN, HIGH);
+    }
+    else if (
+        gasAnalog > 1500 ||
+        freeRAM < 150000 ||
+        externalTemperature > 35
+    )
+    {
+        status = "WARNING";
+
+        digitalWrite(LED_PIN, LOW);
+    }
+    else
+    {
+        digitalWrite(LED_PIN, LOW);
+    }
+
+    // --------------------------------------------------
+    // JSON
+    // --------------------------------------------------
+
+    StaticJsonDocument<1024> json;
+
+    json["cpu_temperature"] = cpuTemperature;
+    json["external_temperature"] = externalTemperature;
+
+    json["humidity"] = humidityState;
+
+    json["gas_level"] = gasAnalog;
+    json["gas_alarm"] = gasDigital;
+
+    json["total_ram"] = totalRAM;
+    json["free_ram"] = freeRAM;
+    json["used_ram"] = usedRAM;
+    json["minimum_free_ram"] = minFreeRAM;
+
+    json["cpu_frequency"] = cpuFrequency;
+    json["cpu_cores"] = cpuCores;
+    json["active_core"] = activeCore;
+
+    json["wifi_signal"] = wifiRSSI;
+    json["wifi_status"] = wifiStatus;
+
+    json["ip_address"] = ipAddress;
+    json["gateway"] = gateway;
+    json["subnet"] = subnet;
+    json["dns"] = dns;
+    json["mac_address"] = macAddress;
+    json["hostname"] = hostname;
+
+    json["chip_model"] = chipModel;
+    json["chip_revision"] = chipRevision;
+    json["flash_size"] = flashSize;
+
+    json["sketch_size"] = sketchSize;
+    json["free_sketch"] = freeSketch;
+
+    json["sdk_version"] = sdkVersion;
+
+    json["uptime"] = uptime;
+
+    json["reconnects"] = reconnectCount;
+
+    json["status"] = status;
+        // ======================================================
+    //            CONVERT JSON TO STRING
+    // ======================================================
+
+    String output;
+
+    serializeJsonPretty(json, output);
+
+    Serial.println();
+    Serial.println("==========================================");
+    Serial.println("ESP32 MONITORING DATA");
+    Serial.println("==========================================");
+    Serial.println(output);
+
+    // ======================================================
+    //                  SEND TO SERVER
+    // ======================================================
+
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        HTTPClient http;
+
+        http.begin(serverURL);
+
+        http.addHeader("Content-Type", "application/json");
+
+        lastHTTPResponse = http.POST(output);
+
+        Serial.println("------------------------------------------");
+        Serial.print("HTTP Response Code : ");
+        Serial.println(lastHTTPResponse);
+
+        if (lastHTTPResponse > 0)
+        {
+            String response = http.getString();
+
+            Serial.print("Server Response : ");
+            Serial.println(response);
+
+            json["http_status"] = "ONLINE";
+        }
+        else
+        {
+            Serial.println("Failed to send data.");
+
+            json["http_status"] = "OFFLINE";
+        }
+
+        http.end();
+    }
+    else
+    {
+        Serial.println("WiFi not connected.");
+    }
+
+    Serial.println("==========================================");
+}
+// ======================================================
+//                       LOOP
+// ======================================================
+
+void loop()
+{
+    // Keep WiFi alive
+    reconnectWiFi();
+
+    // Send data every 5 seconds
+    if (millis() - lastSend >= sendInterval)
+    {
+        lastSend = millis();
+
+        sendData();
+    }
+
+    delay(10);
+}

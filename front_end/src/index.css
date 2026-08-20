@@ -1,0 +1,110 @@
+.header {
+  background-color: #fafafa;
+}
+
+.header-logo {
+  height: 88px;
+}
+
+.main {
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  margin: 0 5px;
+}
+
+.main h1 {
+  text-align: center;
+  width: 100%;
+}
+
+.system-control,
+.sensor-control,
+.network-control {
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.availability-container {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: bold;
+  font-size: 13px;
+}
+
+.status-disc {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.status-disc.online {
+  background-color: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+}
+
+.status-disc.offline {
+  background-color: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+}
+
+.metric-value {
+  font-weight: bold;
+}
+
+.metric-good {
+  color: #22c55e;
+}
+
+.metric-warning {
+  color: #eab308;
+}
+
+.metric-danger {
+  color: #ef4444;
+}
+
+.rasberry {
+
+  gap: 15px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  margin: 0 5px;
+}
+
+.rasberry-control {
+
+  justify-content: space-between;
+  align-items: center;
+
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  padding: 10px;
+}
+.rasberry-main {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 15px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  margin: 0 5px;
+}
+.availability-container-rasberry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: bold;
+  font-size: 13px;
+}
+.ai-control {
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  padding: 10px;
+}

@@ -1,0 +1,15 @@
+@echo off
+start /min "" cmd /c "cd /d C:\Users\ogass\OneDrive\Desktop\stage_dete\back_end && node server.js"
+timeout /t 2 /nobreak >nul
+start /min "" cmd /c "cd /d C:\Users\ogass\OneDrive\Desktop\stage_dete\back_end && py ai_service.py"
+timeout /t 2 /nobreak >nul
+start /min "" cmd /c "cd /d C:\Users\ogass\OneDrive\Desktop\stage_dete\front_end && npm run dev"
+timeout /t 10 /nobreak >nul
+
+taskkill /F /IM msedge.exe >nul 2>&1
+timeout /t 1 /nobreak >nul
+
+start /wait "" "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --app=http://localhost:5173 --window-size=1280,800
+
+taskkill /F /IM node.exe >nul 2>&1
+taskkill /F /IM python.exe >nul 2>&1
