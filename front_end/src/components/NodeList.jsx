@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { fakeNodes } from "./fakeData.js";
 
-export default function NodeList({ nodeType = "esp32" }) {
+export default function NodeList({ nodeType = "esp32", testMode = false }) {
     const [nodes, setNodes] = useState([]);
     const [error, setError] = useState("");
 
@@ -15,8 +16,8 @@ export default function NodeList({ nodeType = "esp32" }) {
             }
 
             const data = await response.json();
-
             setNodes(data);
+            setError("");
         } catch (error) {
             console.error(error);
             setError("Impossible de récupérer les nœuds");
@@ -24,8 +25,14 @@ export default function NodeList({ nodeType = "esp32" }) {
     };
 
     useEffect(() => {
+        if (testMode) {
+            setNodes(fakeNodes);
+            setError("");
+            return;
+        }
+
         loadNodes();
-    }, []);
+    }, [testMode]);
 
     const filteredNodes = nodes.filter(
         (node) => node.node_type === nodeType
@@ -33,7 +40,6 @@ export default function NodeList({ nodeType = "esp32" }) {
 
     return (
         <div className="node-list">
-
             <h2>
                 {nodeType === "esp32"
                     ? "Nœuds ESP32"
@@ -47,9 +53,7 @@ export default function NodeList({ nodeType = "esp32" }) {
             )}
 
             {!error && filteredNodes.length === 0 && (
-                <p>
-                    Aucun nœud enregistré.
-                </p>
+                <p>Aucun nœud enregistré.</p>
             )}
 
             {filteredNodes.map((node) => (
@@ -57,9 +61,7 @@ export default function NodeList({ nodeType = "esp32" }) {
                     className="node-card"
                     key={node.id}
                 >
-                    <h3>
-                        {node.node_name}
-                    </h3>
+                    <h3>{node.node_name}</h3>
 
                     <p>
                         Type : {node.node_type}
@@ -67,13 +69,10 @@ export default function NodeList({ nodeType = "esp32" }) {
 
                     <p>
                         Ajouté le :{" "}
-                        {new Date(
-                            node.added_at
-                        ).toLocaleString()}
+                        {new Date(node.added_at).toLocaleString()}
                     </p>
                 </div>
             ))}
-
         </div>
     );
 }
