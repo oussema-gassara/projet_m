@@ -13,19 +13,17 @@ import AddNode from "./AddNode.jsx";
 import NodeList from "./NodeList.jsx";
 
 export default function Main() {
-
-    // Vérifier si l'utilisateur connecté est administrateur
     const [isAdmin, setIsAdmin] = useState(
         localStorage.getItem("role") === "admin"
     );
 
-    const handleLogout = () => {
+    // Dashboard test mode: ON = use fake values, OFF = use real backend data.
+    const [testMode, setTestMode] = useState(false);
 
-        // Supprimer les informations de connexion
+    const handleLogout = () => {
         localStorage.removeItem("token");
         localStorage.removeItem("username");
         localStorage.removeItem("role");
-
         setIsAdmin(false);
     };
 
@@ -33,82 +31,64 @@ export default function Main() {
         <>
             <Header />
 
-            {/* ================= AUTH BAR ================= */}
-
             <div className="auth-bar">
-
                 {isAdmin ? (
                     <>
                         <span>
-                            Connecté en tant que :{" "}
-                            <span style={{fontWeight: 'bold'}}>
+                            Connecté en tant que:{" "}
+                            <span style={{ fontWeight: "bold" }}>
                                 {localStorage.getItem("username").toUpperCase()}
-                            </span>     
+                            </span>
                         </span>
-
-                        <button 
-                            style={{marginLeft:'5px',borderRadius:'7px',backgroundColor:'FireBrick',color:'white'}}
-                            onClick={handleLogout}>
+                        <button
+                            style={{ marginLeft: "5px", borderRadius: "7px", backgroundColor: "FireBrick", color: "white" }}
+                            onClick={handleLogout}
+                        >
                             Se déconnecter
                         </button>
                     </>
                 ) : (
                     <Link to="/login">
-                        <button
-                            style={{borderRadius: 7,backgroundColor: 'lightblue'}}
-                        >
+                        <button style={{ borderRadius: 7, backgroundColor: "lightblue" }}>
                             Se connecter
                         </button>
                     </Link>
                 )}
-
             </div>
 
+            <div style={{ textAlign: "center", margin: "15px 0" }}>
+                <button
+                    onClick={() => setTestMode((current) => !current)}
+                    style={{
+                        padding: "8px 14px",
+                        borderRadius: "7px",
+                        cursor: "pointer",
+                        fontWeight: "bold",
+                    }}
+                >
+                    TEST MODE: {testMode ? "ON" : "OFF"}
+                </button>
+                <p style={{ margin: "6px 0" }}>
+                    {testMode
+                        ? "Using fake monitoring values"
+                        : "Using real ESP32/backend data"}
+                </p>
+            </div>
 
-            {/* ================= ESP32 ================= */}
-
-            <h1
-                style={{
-                    textAlign: "center",
-                    width: "100%",
-                }}
-            >
+            <h1 style={{ textAlign: "center", width: "100%" }}>
                 ESP32 Monitoring
             </h1>
             <NodeList nodeType="esp32" />
 
             <div className="main">
-
-                <SystemControl
-                    className="system-control"
-                />
-
-                <SensorControl
-                    className="sensor-control"
-                />
-
-                <NetworkControl
-                    className="network-control"
-                />
-
+                <SystemControl testMode={testMode} />
+                <SensorControl testMode={testMode} />
+                <NetworkControl testMode={testMode} />
             </div>
 
+            {isAdmin && <AddNode nodeType="esp32" />}
 
-            {/* ================= ADD ESP32 ================= */}
-
-            {isAdmin && (
-                <AddNode nodeType="esp32" />
-            )}
-
-
-            {/* ================= RASPBERRY PI ================= */}
-
-            <h1
-                style={{
-                    textAlign: "center",
-                    width: "100%",
-                }}
-            >
+            <h1 style={{ textAlign: "center", width: "100%" }}>
                 Raspberry Pi Monitoring
             </h1>
 
@@ -116,34 +96,19 @@ export default function Main() {
                 <Rasberry />
             </div>
 
-
-            {/* ================= ADD RASPBERRY ================= */}
-
-            {isAdmin && (
-                <AddNode nodeType="raspberry" />
-            )}
-
-
-            {/* ================= SECURITY ================= */}
+            {isAdmin && <AddNode nodeType="raspberry" />}
 
             <div className="security">
                 <Security />
             </div>
 
-
-            {/* ================= DANGER ================= */}
-
             <div className="danger">
                 <DangerControl />
             </div>
 
-
-            {/* ================= AI ================= */}
-
             <div className="ai">
                 <Ai />
             </div>
-
         </>
     );
 }
