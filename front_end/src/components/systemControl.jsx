@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import clsx from "clsx";
 import SystemStatus from "./SystemStatus.jsx";
+import { fakeSystem } from "./fakeData.js";
 
 const getLevel = (value, warnAt, dangerAt) => {
     if (value >= dangerAt) return "danger";
@@ -8,10 +9,15 @@ const getLevel = (value, warnAt, dangerAt) => {
     return "good";
 };
 
-export default function SystemControl() {
+export default function SystemControl({ testMode = false }) {
     const [system, setSystem] = useState(null);
 
     useEffect(() => {
+        if (testMode) {
+            setSystem(fakeSystem);
+            return;
+        }
+
         const getSystem = () => {
             fetch("http://localhost:3000/api/system")
                 .then((res) => res.json())
@@ -20,11 +26,9 @@ export default function SystemControl() {
         };
 
         getSystem();
-
         const interval = setInterval(getSystem, 2000);
-
         return () => clearInterval(interval);
-    }, []);
+    }, [testMode]);
 
     return (
         <>
@@ -32,7 +36,7 @@ export default function SystemControl() {
                 <SystemStatus system={system} />
             </div>
             <div className="system-control">
-                <h2>System Control</h2>
+                <h2>System Control {testMode && "(TEST)"}</h2>
                 <hr />
 
                 {!system ? (
@@ -45,13 +49,11 @@ export default function SystemControl() {
                             return (
                                 <p>
                                     CPU Temperature:{" "}
-                                    <span
-                                        className={clsx("metric-value", {
-                                            "metric-good": level === "good",
-                                            "metric-warning": level === "warning",
-                                            "metric-danger": level === "danger",
-                                        })}
-                                    >
+                                    <span className={clsx("metric-value", {
+                                        "metric-good": level === "good",
+                                        "metric-warning": level === "warning",
+                                        "metric-danger": level === "danger",
+                                    })}>
                                         {temp.toFixed(2)} °C
                                     </span>
                                 </p>
@@ -59,7 +61,6 @@ export default function SystemControl() {
                         })()}
 
                         <hr />
-
                         <p>Total RAM: {(system.total_ram / 1024).toFixed(2)} KB</p>
                         <p>Free RAM: {(system.free_ram / 1024).toFixed(2)} KB</p>
                         <p>Used RAM: {(system.used_ram / 1024).toFixed(2)} KB</p>
@@ -71,13 +72,11 @@ export default function SystemControl() {
                             return (
                                 <p>
                                     Used RAM Percentage:{" "}
-                                    <span
-                                        className={clsx("metric-value", {
-                                            "metric-good": level === "good",
-                                            "metric-warning": level === "warning",
-                                            "metric-danger": level === "danger",
-                                        })}
-                                    >
+                                    <span className={clsx("metric-value", {
+                                        "metric-good": level === "good",
+                                        "metric-warning": level === "warning",
+                                        "metric-danger": level === "danger",
+                                    })}>
                                         {usedPct} %
                                     </span>
                                 </p>
@@ -85,32 +84,26 @@ export default function SystemControl() {
                         })()}
 
                         <hr />
-
                         <p>CPU Frequency: {system.cpu_frequency} MHz</p>
                         <p>CPU Cores: {system.cpu_cores}</p>
                         <p>Active Core: {system.active_core}</p>
 
                         <hr />
-
                         <p>Chip Model: {system.chip_model}</p>
                         <p>Chip Revision: {system.chip_revision}</p>
 
                         <hr />
-
                         <p>Flash Size: {(system.flash_size / 1024 / 1024).toFixed(2)} MB</p>
                         <p>Sketch Size: {(system.sketch_size / 1024 / 1024).toFixed(2)} MB</p>
 
                         <hr />
-
                         <p>SDK Version: {system.sdk_version}</p>
 
                         <hr />
-
                         <p>Uptime: {system.uptime} seconds</p>
                         <p>Reconnects: {system.reconnects}</p>
 
                         <hr />
-
                         <p>Status: {system.status}</p>
                     </>
                 )}
