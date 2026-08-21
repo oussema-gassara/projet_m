@@ -5,51 +5,88 @@ console.log("✅ Sensors route loaded");
 
 const db = require("../db");
 
+// GET sensor data for a specific node
+// Example:
+// /api/sensors?node_name=esp32-1
+// /api/sensors?node_name=esp32-2
 
-router.get("/sensors",(req,res)=>{
+router.get("/sensors", (req, res) => {
 
+    const { node_name } = req.query;
 
-const sql = `
+    let sql;
+    let values = [];
 
-SELECT
+    if (node_name) {
 
-external_temperature,
-humidity,
-gas_level,
-gas_alarm,
-status,
-created_at
+        sql = `
+            SELECT
+                node_name,
 
-FROM monitoring_data
+                external_temperature,
+                humidity,
+                gas_level,
+                gas_alarm,
+                status,
+                created_at
 
-ORDER BY id DESC
+            FROM monitoring_data
 
-LIMIT 1
+            WHERE node_name = ?
 
-`;
+            ORDER BY id DESC
 
+            LIMIT 1
+        `;
 
-db.query(sql,(err,result)=>{
+        values = [node_name];
 
+    } else {
 
-if(err){
+        // Compatibilité avec l'ancien frontend :
+        // si aucun node_name n'est fourni, renvoie la dernière donnée ESP32.
 
-console.log(err);
+        sql = `
+            SELECT
+                node_name,
 
-return res.status(500).json({
-error:"Database error"
+                external_temperature,
+                humidity,
+                gas_level,
+                gas_alarm,
+                status,
+                created_at
+
+            FROM monitoring_data
+
+            ORDER BY id DESC
+
+            LIMIT 1
+        `;
+    }
+
+    db.query(sql, values, (err, result) => {
+
+        if (err) {
+
+            console.log("❌ Sensors database error");
+            console.log(err);
+
+            return res.status(500).json({
+                error: "Database error"
+            });
+        }
+
+        if (result.length === 0) {
+
+            return res.status(404).json({
+                error: "Aucune donnée trouvée pour ce nœud",
+                node_name: node_name || null
+            });
+        }
+
+        res.json(result[0]);
+    });
 });
-
-}
-
-
-res.json(result[0]);
-
-
-});
-
-
-});
-
 
 module.exports = router;

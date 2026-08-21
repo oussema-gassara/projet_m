@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import clsx from "clsx";
 import SystemStatus from "./SystemStatus.jsx";
-import { fakeSystem } from "./fakeData.js";
+import { fakeNodeData } from "./fakeData.js";
 
 const getLevel = (value, warnAt, dangerAt) => {
     if (value >= dangerAt) return "danger";
@@ -9,17 +9,17 @@ const getLevel = (value, warnAt, dangerAt) => {
     return "good";
 };
 
-export default function SystemControl({ testMode = false }) {
+export default function SystemControl({ nodeName = "esp32-1", testMode = false }) {
     const [system, setSystem] = useState(null);
 
     useEffect(() => {
         if (testMode) {
-            setSystem(fakeSystem);
+            setSystem(fakeNodeData[nodeName]?.system || null);
             return;
         }
 
         const getSystem = () => {
-            fetch("http://localhost:3000/api/system")
+            fetch(`http://localhost:3000/api/system?node_name=${encodeURIComponent(nodeName)}`)
                 .then((res) => res.json())
                 .then((data) => setSystem(data))
                 .catch((err) => console.error(err));
@@ -28,7 +28,7 @@ export default function SystemControl({ testMode = false }) {
         getSystem();
         const interval = setInterval(getSystem, 2000);
         return () => clearInterval(interval);
-    }, [testMode]);
+    }, [testMode, nodeName]);
 
     return (
         <>

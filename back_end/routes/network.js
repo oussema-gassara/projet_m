@@ -5,56 +5,90 @@ const db = require("../db");
 const requireAuth = require("../middleware/auth");
 console.log("✅ Network route loaded");
 
+// GET network data for a specific node (réservé aux admins connectés)
+// Example:
+// /api/network?node_name=esp32-1
+// /api/network?node_name=esp32-2
 
-router.get("/network", requireAuth, (req,res)=>{
+router.get("/network", requireAuth, (req, res) => {
 
+    const { node_name } = req.query;
 
-const sql = `
+    let sql;
+    let values = [];
 
-SELECT
+    if (node_name) {
 
-wifi_signal,
-wifi_status,
+        sql = `
+            SELECT
+                node_name,
 
-ip_address,
-gateway,
-subnet,
-dns,
+                wifi_signal,
+                wifi_status,
 
-mac_address,
-hostname
+                ip_address,
+                gateway,
+                subnet,
+                dns,
 
-FROM monitoring_data
+                mac_address,
+                hostname
 
-ORDER BY id DESC
+            FROM monitoring_data
 
-LIMIT 1
+            WHERE node_name = ?
 
-`;
+            ORDER BY id DESC
 
+            LIMIT 1
+        `;
 
+        values = [node_name];
 
-db.query(sql,(err,result)=>{
+    } else {
 
+        // Compatibilité avec l'ancien frontend
+        sql = `
+            SELECT
+                node_name,
 
-if(err){
+                wifi_signal,
+                wifi_status,
 
-console.log(err);
+                ip_address,
+                gateway,
+                subnet,
+                dns,
 
-return res.status(500).json({
-error:"Database error"
+                mac_address,
+                hostname
+
+            FROM monitoring_data
+
+            ORDER BY id DESC
+
+            LIMIT 1
+        `;
+    }
+
+    db.query(sql, values, (err, result) => {
+
+        if (err) {
+            console.log(err);
+            return res.status(500).json({
+                error: "Database error"
+            });
+        }
+
+        if (result.length === 0) {
+            return res.status(404).json({
+                error: "Aucune donnée trouvée pour ce nœud",
+                node_name: node_name || null
+            });
+        }
+
+        res.json(result[0]);
+    });
 });
-
-}
-
-
-res.json(result[0]);
-
-
-});
-
-
-});
-
 
 module.exports = router;

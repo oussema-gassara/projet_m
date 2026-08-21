@@ -1,22 +1,22 @@
 import { useState, useEffect } from "react";
 import clsx from "clsx";
-import { fakeNetwork } from "./fakeData.js";
+import { fakeNodeData } from "./fakeData.js";
 
-export default function NetworkControl({ testMode = false }) {
+export default function NetworkControl({ nodeName = "esp32-1", testMode = false }) {
     const [network, setNetwork] = useState(null);
     const [denied, setDenied] = useState(false);
 
     useEffect(() => {
         if (testMode) {
             setDenied(false);
-            setNetwork(fakeNetwork);
+            setNetwork(fakeNodeData[nodeName]?.network || null);
             return;
         }
 
         const getNetwork = () => {
             const token = localStorage.getItem("token");
 
-            fetch("http://localhost:3000/api/network", {
+            fetch(`http://localhost:3000/api/network?node_name=${encodeURIComponent(nodeName)}`, {
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
             })
                 .then((res) => {
@@ -36,7 +36,7 @@ export default function NetworkControl({ testMode = false }) {
         getNetwork();
         const interval = setInterval(getNetwork, 2000);
         return () => clearInterval(interval);
-    }, [testMode]);
+    }, [testMode, nodeName]);
 
     if (denied) {
         return (

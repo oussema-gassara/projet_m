@@ -1,16 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 
 import Header from "./header.jsx";
-import SystemControl from "./systemControl.jsx";
-import SensorControl from "./sensorControl.jsx";
-import NetworkControl from "./networkControl.jsx";
+import EspNodeCard from "./EspNodeCard.jsx";
 import Rasberry from "./rasberry.jsx";
 import Security from "./security.jsx";
 import Ai from "./AiDetection.jsx";
 import DangerControl from "./dangerControl.jsx";
 import AddNode from "./AddNode.jsx";
-import NodeList from "./NodeList.jsx";
+import { fakeNodes } from "./fakeData.js";
 
 export default function Main() {
     const [isAdmin, setIsAdmin] = useState(
@@ -19,6 +17,35 @@ export default function Main() {
 
     // Dashboard test mode: ON = use fake values, OFF = use real backend data.
     const [testMode, setTestMode] = useState(false);
+
+    const [espNodes, setEspNodes] = useState([]);
+    const [nodesError, setNodesError] = useState("");
+
+    const loadNodes = () => {
+        if (testMode) {
+            setEspNodes(fakeNodes.filter((n) => n.node_type === "esp32"));
+            setNodesError("");
+            return;
+        }
+
+        fetch("http://localhost:3000/api/nodes")
+            .then((res) => {
+                if (!res.ok) throw new Error("Erreur serveur");
+                return res.json();
+            })
+            .then((data) => {
+                setEspNodes(data.filter((n) => n.node_type === "esp32"));
+                setNodesError("");
+            })
+            .catch((err) => {
+                console.error(err);
+                setNodesError("Impossible de récupérer les nœuds");
+            });
+    };
+
+    useEffect(() => {
+        loadNodes();
+    }, [testMode]);
 
     const handleLogout = () => {
         localStorage.removeItem("token");
@@ -78,15 +105,22 @@ export default function Main() {
             <h1 style={{ textAlign: "center", width: "100%" }}>
                 ESP32 Monitoring
             </h1>
-            <NodeList nodeType="esp32" testMode={testMode} />
 
-            <div className="main">
-                <SystemControl testMode={testMode} />
-                <SensorControl testMode={testMode} />
-                <NetworkControl testMode={testMode} />
-            </div>
+            {nodesError && <p className="metric-danger">{nodesError}</p>}
 
-            {isAdmin && <AddNode nodeType="esp32" />}
+            {!nodesError && espNodes.length === 0 && (
+                <p style={{ textAlign: "center" }}>Aucun nœud ESP32 enregistré.</p>
+            )}
+
+            {espNodes.map((node) => (
+                <EspNodeCard
+                    key={node.id}
+                    nodeName={node.node_name}
+                    testMode={testMode}
+                />
+            ))}
+
+            {isAdmin && <AddNode nodeType="esp32" onAdded={loadNodes} />}
 
             <h1 style={{ textAlign: "center", width: "100%" }}>
                 Raspberry Pi Monitoring
