@@ -2,7 +2,8 @@
 setlocal EnableExtensions EnableDelayedExpansion
 REM =========================================================
 REM  ESP32 AUTO FLASH
-REM  Detecte automatiquement le port COM si un seul ESP32 est branche.
+REM  Detecte les ports serie et permet de choisir celui a flasher.
+REM  Plusieurs ESP32 peuvent rester connectes et fonctionner.
 REM =========================================================
 
 cd /d "%~dp0"
@@ -19,14 +20,15 @@ if not exist "%SKETCH_PATH%" (
 
 echo =========================================================
 echo          ESP32 AUTO FLASH
-echo =========================================================
+ echo =========================================================
 echo.
-echo Detection du port ESP32...
+echo Ports serie detectes:
+echo.
 
 for /f "tokens=1" %%P in ('arduino-cli board list ^| findstr /R /B "COM[0-9][0-9]*"') do (
     set /a PORT_COUNT+=1
-    set "FOUND_PORT=%%P"
-    echo Port detecte: %%P
+    set "PORT[!PORT_COUNT!]=%%P"
+    echo   [!PORT_COUNT!] %%P
 )
 
 echo.
@@ -38,19 +40,41 @@ if "%PORT_COUNT%"=="0" (
     exit /b 1
 )
 
-if not "%PORT_COUNT%"=="1" (
-    echo ERREUR: Plusieurs ports serie sont detectes.
-    echo Pour eviter de flasher le mauvais ESP32, laisse un seul ESP32 branche.
-    echo.
-    arduino-cli board list
-    pause
-    exit /b 1
-)
-
-set "PORT=%FOUND_PORT%"
-echo Port utilise: %PORT%
+echo Details des cartes detectees:
+echo.
+arduino-cli board list
 echo.
 
+:SELECT_PORT
+set "CHOICE="
+set /p "CHOICE=Choisis le numero de l'ESP32 a flasher [1-%PORT_COUNT%]: "
+
+if not defined CHOICE goto SELECT_PORT
+
+set "PORT=!PORT[%CHOICE%]!"
+if not defined PORT (
+    echo.
+    echo Choix invalide.
+    goto SELECT_PORT
+)
+
+echo.
+echo ESP32 selectionne: %PORT%
+echo.
+echo ATTENTION: seul %PORT% sera flashe.
+echo Les autres ESP32 connectes continuent de fonctionner normalement.
+echoice /C OAN /N /M "Confirmer le flash ? [O=Oui A=Annuler]: "
+if errorlevel 2 (
+    echo Flash annule.
+    pause
+    exit /b 0
+)
+if errorlevel 1 goto FLASH
+
+goto SELECT_PORT
+
+:FLASH
+echo.
 echo =========================================================
 echo          COMPILATION
 echo =========================================================
@@ -81,7 +105,7 @@ echo          FLASH TERMINE AVEC SUCCES
 echo.
 echo Si c'est une nouvelle carte, connecte-toi a ESP32-SETUP.
 echo Puis ouvre http://192.168.4.1
- echo Configure un nom unique: esp32-1, esp32-2, esp32-3, etc.
+echo Configure un nom unique: esp32-1, esp32-2, esp32-3, etc.
 echo Le nom est sauvegarde dans la memoire de l'ESP32.
 echo.
 pause
