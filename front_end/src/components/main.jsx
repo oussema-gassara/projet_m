@@ -47,10 +47,52 @@ export default function Main() {
 
         if (testMode) return;
 
-        // Automatically detect new ESP32 nodes without refreshing the page.
         const interval = setInterval(loadNodes, 3000);
         return () => clearInterval(interval);
     }, [loadNodes, testMode]);
+
+    const handleRemoveNode = async (node) => {
+        const confirmed = window.confirm(
+            `Voulez-vous supprimer le nœud ${node.node_name} ?`
+        );
+
+        if (!confirmed) return;
+
+        // In TEST MODE, remove only the fake card from the current dashboard.
+        if (testMode) {
+            setEspNodes((current) =>
+                current.filter((item) => item.node_name !== node.node_name)
+            );
+            return;
+        }
+
+        try {
+            const token = localStorage.getItem("token");
+
+            const response = await fetch(
+                `http://localhost:3000/api/nodes/${node.id}`,
+                {
+                    method: "DELETE",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || "Erreur lors de la suppression");
+            }
+
+            setEspNodes((current) =>
+                current.filter((item) => item.id !== node.id)
+            );
+        } catch (error) {
+            console.error(error);
+            setNodesError(error.message || "Impossible de supprimer le nœud");
+        }
+    };
 
     const handleLogout = () => {
         localStorage.removeItem("token");
@@ -121,8 +163,9 @@ export default function Main() {
                 {espNodes.map((node) => (
                     <EspNodeCard
                         key={node.id || node.node_name}
-                        nodeName={node.node_name}
+                        node={node}
                         testMode={testMode}
+                        onRemove={isAdmin ? handleRemoveNode : undefined}
                     />
                 ))}
             </div>
