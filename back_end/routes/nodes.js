@@ -20,7 +20,7 @@ router.get("/nodes", (req, res) => {
     });
 });
 
-// Ajout d'un nouveau nœud (protégé : réservé à l'admin, boutons "+ Ajouter ESP32" / "+ Ajouter Raspberry Pi")
+// Ajout d'un nouveau nœud (protégé : réservé à l'admin)
 router.post("/nodes", requireAuth, (req, res) => {
     const { node_name, node_type } = req.body;
 
@@ -44,6 +44,26 @@ router.post("/nodes", requireAuth, (req, res) => {
         }
 
         res.json({ message: "Nœud ajouté", id: result.insertId, node_name, node_type });
+    });
+});
+
+// Suppression d'un nœud (protégée : réservé à l'admin)
+router.delete("/nodes/:id", requireAuth, (req, res) => {
+    const { id } = req.params;
+
+    const sql = `DELETE FROM nodes WHERE id = ?`;
+
+    db.query(sql, [id], (err, result) => {
+        if (err) {
+            console.log(err);
+            return res.status(500).json({ error: "Database error" });
+        }
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: "Nœud introuvable" });
+        }
+
+        res.json({ message: "Nœud supprimé", id });
     });
 });
 
