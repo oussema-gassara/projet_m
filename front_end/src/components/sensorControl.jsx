@@ -1,18 +1,18 @@
 import { useState, useEffect } from "react";
 import clsx from "clsx";
-import { fakeSensor } from "./fakeData.js";
+import { fakeNodeData } from "./fakeData.js";
 
-export default function SensorControl({ testMode = false }) {
+export default function SensorControl({ nodeName = "esp32-1", testMode = false }) {
     const [sensor, setSensor] = useState(null);
 
     useEffect(() => {
         if (testMode) {
-            setSensor(fakeSensor);
+            setSensor(fakeNodeData[nodeName]?.sensor || null);
             return;
         }
 
         const getSensor = () => {
-            fetch("http://localhost:3000/api/sensors")
+            fetch(`http://localhost:3000/api/sensors?node_name=${encodeURIComponent(nodeName)}`)
                 .then(res => res.json())
                 .then(data => setSensor(data))
                 .catch(err => console.error(err));
@@ -21,7 +21,7 @@ export default function SensorControl({ testMode = false }) {
         getSensor();
         const interval = setInterval(getSensor, 2000);
         return () => clearInterval(interval);
-    }, [testMode]);
+    }, [testMode, nodeName]);
 
     if (!sensor) {
         return <h2>Loading sensor data...</h2>;
