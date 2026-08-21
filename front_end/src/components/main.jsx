@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 
 import Header from "./header.jsx";
@@ -15,37 +15,42 @@ export default function Main() {
         localStorage.getItem("role") === "admin"
     );
 
-    // Dashboard test mode: ON = use fake values, OFF = use real backend data.
     const [testMode, setTestMode] = useState(false);
-
     const [espNodes, setEspNodes] = useState([]);
     const [nodesError, setNodesError] = useState("");
 
-    const loadNodes = () => {
+    const loadNodes = useCallback(async () => {
         if (testMode) {
             setEspNodes(fakeNodes.filter((n) => n.node_type === "esp32"));
             setNodesError("");
             return;
         }
 
-        fetch("http://localhost:3000/api/nodes")
-            .then((res) => {
-                if (!res.ok) throw new Error("Erreur serveur");
-                return res.json();
-            })
-            .then((data) => {
-                setEspNodes(data.filter((n) => n.node_type === "esp32"));
-                setNodesError("");
-            })
-            .catch((err) => {
-                console.error(err);
-                setNodesError("Impossible de récupérer les nœuds");
-            });
-    };
+        try {
+            const response = await fetch("http://localhost:3000/api/nodes");
+
+            if (!response.ok) {
+                throw new Error("Erreur serveur");
+            }
+
+            const data = await response.json();
+            setEspNodes(data.filter((n) => n.node_type === "esp32"));
+            setNodesError("");
+        } catch (error) {
+            console.error(error);
+            setNodesError("Impossible de récupérer les nœuds");
+        }
+    }, [testMode]);
 
     useEffect(() => {
         loadNodes();
-    }, [testMode]);
+
+        if (testMode) return;
+
+        // Automatically detect new ESP32 nodes without refreshing the page.
+        const interval = setInterval(loadNodes, 3000);
+        return () => clearInterval(interval);
+    }, [loadNodes, testMode]);
 
     const handleLogout = () => {
         localStorage.removeItem("token");
@@ -112,13 +117,15 @@ export default function Main() {
                 <p style={{ textAlign: "center" }}>Aucun nœud ESP32 enregistré.</p>
             )}
 
-            {espNodes.map((node) => (
-                <EspNodeCard
-                    key={node.id}
-                    nodeName={node.node_name}
-                    testMode={testMode}
-                />
-            ))}
+            <div className="esp-nodes-container">
+                {espNodes.map((node) => (
+                    <EspNodeCard
+                        key={node.id || node.node_name}
+                        nodeName={node.node_name}
+                        testMode={testMode}
+                    />
+                ))}
+            </div>
 
             {isAdmin && <AddNode nodeType="esp32" onAdded={loadNodes} />}
 
