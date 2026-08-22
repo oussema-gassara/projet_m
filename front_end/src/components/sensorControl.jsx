@@ -2,6 +2,11 @@ import { useState, useEffect } from "react";
 import clsx from "clsx";
 import { fakeNodeData } from "./fakeData.js";
 
+const numberOrNull = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+};
+
 export default function SensorControl({ nodeName = "esp32-1", testMode = false }) {
     const [sensor, setSensor] = useState(null);
 
@@ -27,6 +32,13 @@ export default function SensorControl({ nodeName = "esp32-1", testMode = false }
         return <h2>Loading sensor data...</h2>;
     }
 
+    const externalTemp = numberOrNull(sensor.external_temperature);
+    const gasLevel = numberOrNull(sensor.gas_level);
+    const humidity = numberOrNull(sensor.humidity);
+
+    // ESP32 humidity encoding: 0 = Humid environment, 1 = Dry environment.
+    const isDry = humidity === 1;
+
     return (
         <div className="sensor-control">
             <h2>Sensor Control {testMode && "(TEST)"}</h2>
@@ -35,11 +47,11 @@ export default function SensorControl({ nodeName = "esp32-1", testMode = false }
             <p>
                 External Temperature:{" "}
                 <span className={clsx("metric-value", {
-                    "metric-good": Number(sensor.external_temperature) < 30,
-                    "metric-warning": Number(sensor.external_temperature) >= 30 && Number(sensor.external_temperature) <= 40,
-                    "metric-danger": Number(sensor.external_temperature) > 40,
+                    "metric-good": externalTemp !== null && externalTemp < 30,
+                    "metric-warning": externalTemp !== null && externalTemp >= 30 && externalTemp <= 40,
+                    "metric-danger": externalTemp !== null && externalTemp > 40,
                 })}>
-                    {Number(sensor.external_temperature).toFixed(2)} °C
+                    {externalTemp === null ? "—" : `${externalTemp.toFixed(2)} °C`}
                 </span>
             </p>
             <hr />
@@ -47,10 +59,10 @@ export default function SensorControl({ nodeName = "esp32-1", testMode = false }
             <p>
                 Humidity:{" "}
                 <span className={clsx("metric-value", {
-                    "metric-good": Number(sensor.humidity) === 0,
-                    "metric-danger": Number(sensor.humidity) !== 0,
+                    "metric-good": !isDry,
+                    "metric-danger": isDry,
                 })}>
-                    {Number(sensor.humidity) === 0 ? "Humid environment" : "Dry environment"}
+                    {humidity === null ? "—" : isDry ? "Dry environment" : "Humid environment"}
                 </span>
             </p>
             <hr />
@@ -58,18 +70,22 @@ export default function SensorControl({ nodeName = "esp32-1", testMode = false }
             <p>
                 Gas Level:{" "}
                 <span className={clsx("metric-value", {
-                    "metric-good": sensor.gas_level < 300,
-                    "metric-warning": sensor.gas_level >= 300 && sensor.gas_level <= 600,
-                    "metric-danger": sensor.gas_level > 600,
+                    "metric-good": gasLevel !== null && gasLevel < 300,
+                    "metric-warning": gasLevel !== null && gasLevel >= 300 && gasLevel <= 600,
+                    "metric-danger": gasLevel !== null && gasLevel > 600,
                 })}>
-                    {sensor.gas_level}
+                    {gasLevel === null ? "—" : gasLevel}
                 </span>
             </p>
             <hr />
 
-            <p>Status: {sensor.status}</p>
+            <p>Status: {sensor.status || "—"}</p>
             <hr />
-            <p>Gas Alarm: {sensor.gas_alarm ? "Normal Air" : "Alert: High Gas Level"}</p>
+            <p>
+                Gas Alarm: {sensor.gas_alarm === undefined || sensor.gas_alarm === null
+                    ? "—"
+                    : Number(sensor.gas_alarm) ? "Normal Air" : "Alert: High Gas Level"}
+            </p>
         </div>
     );
 }
