@@ -245,11 +245,15 @@ body{font-family:Arial;background:#f2f2f2;margin:0;padding:30px}
 .container{max-width:450px;margin:auto;background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,.15)}
 h1{text-align:center}label{display:block;margin-top:15px;font-weight:bold}
 input{width:100%;padding:12px;margin-top:7px;box-sizing:border-box;border:1px solid #ccc;border-radius:6px}
-button{width:100%;padding:13px;margin-top:25px;background:#007bff;color:white;border:0;border-radius:6px;font-size:16px;cursor:pointer}
+button{width:100%;padding:13px;margin-top:25px;background:#B22222;;color:white;border:0;border-radius:6px;font-size:16px;cursor:pointer}
 .info{margin-top:15px;font-size:14px;color:#555}
 </style>
 </head>
 <body>
+<header>
+    <img src="/logo.webp" alt="Logo">
+</header>
+<hr/>
 <div class="container">
 <h1>ESP32 Setup</h1>
 <p>Configure WiFi and identify this ESP32 node.</p>

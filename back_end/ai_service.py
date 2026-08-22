@@ -31,25 +31,42 @@ DETECTION_FEATURES = [
     "gas_level",
 ]
 
+# Each ESP32 gets its own Isolation Forest, trained only on its own
+# history, so one node's normal readings can never make another
+# node's normal readings look anomalous.
+ROWS_PER_NODE_LIMIT = 200
+MIN_SAMPLES_PER_NODE = 20
 
-def get_recent_data(limit=200):
+
+def get_recent_data(limit_per_node=ROWS_PER_NODE_LIMIT):
     conn = mysql.connector.connect(**DB_CONFIG)
 
     columns = PREDICTION_FEATURES + DETECTION_FEATURES + ["total_ram"]
 
+    # Pull a generous window across all ESP32 nodes; we trim it down
+    # to each node's own most recent rows below. Multiplying by a
+    # fixed fan-out keeps this simple without a second DB round trip.
     query = f"""
         SELECT node_name, {", ".join(columns)}
         FROM monitoring_data
         WHERE node_name IS NOT NULL
           AND node_name LIKE 'esp32%'
         ORDER BY id DESC
-        LIMIT {limit}
+        LIMIT {limit_per_node * 20}
     """
 
     df = pd.read_sql(query, conn)
     conn.close()
 
-    return df.dropna(subset=PREDICTION_FEATURES + ["total_ram"])
+    df = df.dropna(subset=PREDICTION_FEATURES + ["total_ram"])
+
+    # Rows are newest-first from the query, so head(n) per node keeps
+    # each node's own most recent history.
+    df = df.groupby("node_name", group_keys=False).apply(
+        lambda g: g.head(limit_per_node)
+    )
+
+    return df
 
 
 def diagnose(latest_row):
@@ -160,49 +177,71 @@ def diagnose(latest_row):
     return messages
 
 
-def run_isolation_forest(df):
-    """Run Isolation Forest using only PREDICTION_FEATURES."""
-    if len(df) < 2:
-        return [1] * len(df), [0.0] * len(df)
+def run_isolation_forest_for_node(training_df, row_to_score):
+    """Train a dedicated Isolation Forest on one node's own history and
+    score a single row (which may or may not be part of that history —
+    TEST MODE scores a fake row against the node's real history).
+
+    Returns (prediction, score, status) where status is
+    'trained' or 'insufficient_data'.
+    """
+    if len(training_df) < MIN_SAMPLES_PER_NODE:
+        return None, None, "insufficient_data"
 
     model = IsolationForest(contamination="auto", random_state=42)
-    model.fit(df[PREDICTION_FEATURES])
+    model.fit(training_df[PREDICTION_FEATURES])
 
-    predictions = model.predict(df[PREDICTION_FEATURES])
-    scores = model.decision_function(df[PREDICTION_FEATURES])
-    return predictions, scores
+    row_features = row_to_score[PREDICTION_FEATURES].to_frame().T.astype(float)
+    prediction = model.predict(row_features)[0]
+    score = model.decision_function(row_features)[0]
+    return prediction, score, "trained"
 
 
-def build_detections(df):
-    predictions, scores = run_isolation_forest(df)
-
-    latest_by_node = df.groupby("node_name", dropna=False, sort=False).head(1)
+def build_detections(latest_df, history_df=None):
+    """latest_df: one or more rows per node to report on (most recent
+    row per node is used). history_df: data used to train each node's
+    model; defaults to latest_df itself (normal /detect flow). Passing
+    a separate history_df lets TEST MODE score fake values against a
+    node's real historical baseline instead of training on fake data.
+    """
+    same_source = history_df is None
+    if same_source:
+        history_df = latest_df
 
     detections = []
 
-    for index, latest_row in latest_by_node.iterrows():
-        node_name = latest_row["node_name"]
-        node_name = str(node_name) if pd.notna(node_name) else "ESP32 inconnu"
+    for node_name, node_latest in latest_df.groupby("node_name", dropna=False, sort=False):
+        node_name_str = str(node_name) if pd.notna(node_name) else "ESP32 inconnu"
+
+        # Rows are newest-first, so the first row is the latest reading.
+        latest_row = node_latest.iloc[0]
+
+        if same_source:
+            node_history = node_latest
+        else:
+            node_history = history_df[history_df["node_name"] == node_name]
+
+        prediction, score, status = run_isolation_forest_for_node(node_history, latest_row)
+        is_anomaly = bool(status == "trained" and prediction == -1)
+        anomaly_score = float(score) if status == "trained" else None
 
         latest_values = latest_row[PREDICTION_FEATURES + DETECTION_FEATURES].to_dict()
         latest_values["total_ram"] = latest_row["total_ram"]
 
-        row_position = df.index.get_loc(index)
-        prediction = predictions[row_position]
-        score = scores[row_position]
-
         messages = diagnose(latest_row)
 
-        if prediction == -1:
+        if is_anomaly:
             messages.insert(0, {
                 "text": "Comportement inhabituel détecté par Isolation Forest.",
                 "level": "danger"
             })
 
         detections.append({
-            "node_name": node_name,
-            "is_anomaly": bool(prediction == -1),
-            "anomaly_score": float(score),
+            "node_name": node_name_str,
+            "is_anomaly": is_anomaly,
+            "anomaly_score": anomaly_score,
+            "model_status": status,
+            "samples_used": len(node_history),
             "latest_values": latest_values,
             "messages": messages,
         })
@@ -214,13 +253,11 @@ def build_detections(df):
 def detect():
     df = get_recent_data()
 
-    if len(df) < 20:
+    if df.empty:
         return jsonify({
-            "error": "Pas encore assez de données",
-            "is_anomaly": False,
-            "rows_available": len(df),
+            "error": "Pas encore de données",
+            "rows_available": 0,
             "detections": [],
-            "messages": [],
         })
 
     detections = build_detections(df)
@@ -284,12 +321,18 @@ def detect_test():
             "detections": [],
         }), 400
 
-    df = pd.DataFrame(rows)
-    detections = build_detections(df)
+    test_df = pd.DataFrame(rows)
+
+    # Score the injected TEST MODE values against each node's real
+    # historical baseline, so TEST MODE actually exercises the model
+    # instead of always reporting "insufficient_data".
+    history_df = get_recent_data()
+
+    detections = build_detections(test_df, history_df=history_df)
 
     return jsonify({
         "test_mode": True,
-        "rows_used": len(df),
+        "rows_used": len(test_df),
         "nodes_detected": len(detections),
         "detections": detections,
     })

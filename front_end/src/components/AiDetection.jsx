@@ -86,12 +86,39 @@ export default function AiDetection({ testMode = false, testNodes = [] }) {
 
                         const hasProblems = problems.length > 0;
 
+                        const modelStatus = node.model_status;
+                        const isAnomaly = node.is_anomaly;
+                        const score =
+                            typeof node.anomaly_score === "number"
+                                ? node.anomaly_score.toFixed(3)
+                                : null;
+
                         return (
                             <div className="ai-node" key={node.node_name}>
                                 <h3>{node.node_name}</h3>
 
                                 <p>
-                                    État IA:{" "}
+                                    Isolation Forest:{" "}
+                                    <span
+                                        className={clsx(
+                                            "metric-value",
+                                            modelStatus === "insufficient_data"
+                                                ? "metric-warning"
+                                                : isAnomaly
+                                                ? "metric-danger"
+                                                : "metric-good"
+                                        )}
+                                    >
+                                        {modelStatus === "insufficient_data"
+                                            ? "Apprentissage en cours (historique insuffisant)"
+                                            : isAnomaly
+                                            ? `Anomalie détectée (score ${score})`
+                                            : `Normal (score ${score})`}
+                                    </span>
+                                </p>
+
+                                <p>
+                                    État global:{" "}
                                     <span
                                         className={clsx(
                                             "metric-value",
