@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import mysql.connector
 import pandas as pd
 from sklearn.ensemble import IsolationForest
@@ -127,6 +127,7 @@ def diagnose(latest_row):
     # Humidity detection only — never used by Isolation Forest.
     humidity_value = latest_row["humidity"]
     if pd.notna(humidity_value):
+        humidity_text = str(humidity_value).lower()
         try:
             humidity = float(humidity_value)
             if humidity < 30 or humidity > 70:
@@ -135,7 +136,6 @@ def diagnose(latest_row):
                     "level": "warning"
                 })
         except (TypeError, ValueError):
-            humidity_text = str(humidity_value).lower()
             if "dry" in humidity_text or "humid" in humidity_text:
                 messages.append({
                     "text": "Humidité ambiante à surveiller.",
@@ -145,41 +145,40 @@ def diagnose(latest_row):
     return messages
 
 
-@app.route("/detect", methods=["GET"])
-def detect():
-    df = get_recent_data()
+def run_isolation_forest(df):
+    """Run Isolation Forest using only PREDICTION_FEATURES."""
+    if len(df) < 2:
+        return [1] * len(df), [0.0] * len(df)
 
-    if len(df) < 20:
-        return jsonify({
-            "error": "Pas encore assez de données",
-            "is_anomaly": False,
-            "rows_available": len(df),
-            "detections": [],
-            "messages": [],
-        })
-
-    # IMPORTANT: Isolation Forest uses ONLY prediction features.
-    model = IsolationForest(contamination=0.05, random_state=42)
+    # auto works for a small TEST MODE dataset and avoids requiring
+    # 20+ historical rows just to demonstrate the model.
+    model = IsolationForest(contamination="auto", random_state=42)
     model.fit(df[PREDICTION_FEATURES])
 
-    # Keep the most recent measurement of each ESP32.
+    predictions = model.predict(df[PREDICTION_FEATURES])
+    scores = model.decision_function(df[PREDICTION_FEATURES])
+    return predictions, scores
+
+
+def build_detections(df):
+    predictions, scores = run_isolation_forest(df)
+
+    # The input is already ordered newest-first for real data.
     latest_by_node = df.groupby("node_name", dropna=False, sort=False).head(1)
 
     detections = []
 
-    for _, latest_row in latest_by_node.iterrows():
+    for index, latest_row in latest_by_node.iterrows():
+        node_name = latest_row["node_name"]
+        node_name = str(node_name) if pd.notna(node_name) else "ESP32 inconnu"
+
         latest_values = latest_row[PREDICTION_FEATURES + DETECTION_FEATURES].to_dict()
         latest_values["total_ram"] = latest_row["total_ram"]
 
-        # Prediction uses ONLY PREDICTION_FEATURES.
-        latest_for_model = pd.DataFrame([
-            latest_row[PREDICTION_FEATURES].to_dict()
-        ])
-        prediction = model.predict(latest_for_model)[0]
-        score = model.decision_function(latest_for_model)[0]
-
-        node_name = latest_row["node_name"]
-        node_name = str(node_name) if pd.notna(node_name) else "ESP32 inconnu"
+        # Find this row's model result without ever adding gas/humidity.
+        row_position = df.index.get_loc(index)
+        prediction = predictions[row_position]
+        score = scores[row_position]
 
         messages = diagnose(latest_row)
 
@@ -197,7 +196,82 @@ def detect():
             "messages": messages,
         })
 
+    return detections
+
+
+@app.route("/detect", methods=["GET"])
+def detect():
+    df = get_recent_data()
+
+    if len(df) < 20:
+        return jsonify({
+            "error": "Pas encore assez de données",
+            "is_anomaly": False,
+            "rows_available": len(df),
+            "detections": [],
+            "messages": [],
+        })
+
+    detections = build_detections(df)
+
     return jsonify({
+        "rows_used": len(df),
+        "nodes_detected": len(detections),
+        "detections": detections,
+    })
+
+
+@app.route("/detect-test", methods=["POST"])
+def detect_test():
+    """Analyze exactly the fake ESP32 values displayed by TEST MODE."""
+    payload = request.get_json(silent=True) or {}
+    nodes = payload.get("nodes", [])
+
+    if not isinstance(nodes, list) or not nodes:
+        return jsonify({
+            "error": "Aucune donnée ESP32 de test reçue",
+            "detections": [],
+        }), 400
+
+    rows = []
+
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+
+        # Only ESP32 nodes are accepted in TEST MODE.
+        node_name = str(node.get("node_name", ""))
+        if not node_name.lower().startswith("esp32"):
+            continue
+
+        system = node.get("system", {})
+        sensor = node.get("sensor", {})
+        network = node.get("network", {})
+
+        rows.append({
+            "node_name": node_name,
+            "used_ram": float(system.get("used_ram", 0)),
+            "total_ram": float(system.get("total_ram", 0)),
+            "cpu_temperature": float(system.get("cpu_temperature", 0)),
+            "external_temperature": float(sensor.get("external_temperature", 0)),
+            "wifi_signal": float(network.get("wifi_signal", 0)),
+            "gas_level": float(sensor.get("gas_level", 0)),
+            # fakeData uses 0 = humid environment and 1 = dry environment.
+            # Keep this as detection-only metadata.
+            "humidity": sensor.get("humidity"),
+        })
+
+    if not rows:
+        return jsonify({
+            "error": "Aucun nœud ESP32 de test valide",
+            "detections": [],
+        }), 400
+
+    df = pd.DataFrame(rows)
+    detections = build_detections(df)
+
+    return jsonify({
+        "test_mode": True,
         "rows_used": len(df),
         "nodes_detected": len(detections),
         "detections": detections,
