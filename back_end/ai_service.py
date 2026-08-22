@@ -16,7 +16,16 @@ DB_CONFIG = {
     "database": os.getenv("DB_NAME"),
 }
 
-FEATURES = ["used_ram", "cpu_temperature", "wifi_signal", "external_temperature"]
+# AI is ESP32-only for now.
+# Raspberry Pi data is intentionally not queried here.
+FEATURES = [
+    "used_ram",
+    "cpu_temperature",
+    "wifi_signal",
+    "external_temperature",
+    "humidity",
+    "gas_level",
+]
 
 
 def get_recent_data(limit=200):
@@ -25,6 +34,8 @@ def get_recent_data(limit=200):
     query = f"""
         SELECT node_name, {", ".join(FEATURES)}, total_ram
         FROM monitoring_data
+        WHERE node_name IS NOT NULL
+          AND node_name LIKE 'esp32%'
         ORDER BY id DESC
         LIMIT {limit}
     """
@@ -45,6 +56,7 @@ def diagnose(latest_row):
     cpu_temp = float(latest_row["cpu_temperature"] or 0)
     wifi_signal = float(latest_row["wifi_signal"] or 0)
     ext_temp = float(latest_row["external_temperature"] or 0)
+    gas_level = float(latest_row["gas_level"] or 0)
 
     if ram_percent > 90:
         messages.append({
@@ -68,14 +80,15 @@ def diagnose(latest_row):
             "level": "warning"
         })
 
+    # Wi-Fi RSSI: values closer to 0 are stronger.
     if wifi_signal < -80:
         messages.append({
-            "text": "Signal Wi-Fi faible — rapprochez l'ESP32 du routeur.",
+            "text": "Signal Wi-Fi très faible — rapprochez l'ESP32 du routeur.",
             "level": "danger"
         })
-    elif wifi_signal < -60:
+    elif wifi_signal < -65:
         messages.append({
-            "text": "Signal Wi-Fi modéré — la connexion peut être instable.",
+            "text": "Signal Wi-Fi faible — la connexion peut être instable.",
             "level": "warning"
         })
 
@@ -87,6 +100,17 @@ def diagnose(latest_row):
     elif ext_temp > 30:
         messages.append({
             "text": "Température ambiante élevée — à surveiller.",
+            "level": "warning"
+        })
+
+    if gas_level >= 600:
+        messages.append({
+            "text": "Niveau de gaz critique — vérifiez immédiatement l'environnement et le capteur MQ-2.",
+            "level": "danger"
+        })
+    elif gas_level >= 400:
+        messages.append({
+            "text": "Niveau de gaz élevé — surveillez le capteur MQ-2.",
             "level": "warning"
         })
 
@@ -106,12 +130,11 @@ def detect():
             "messages": [],
         })
 
-    # Train Isolation Forest on the recent monitoring history.
-    model_features = df[FEATURES]
+    # Train Isolation Forest on ESP32 monitoring history only.
     model = IsolationForest(contamination=0.05, random_state=42)
-    model.fit(model_features)
+    model.fit(df[FEATURES])
 
-    # The first row is the most recent row because the SQL query is DESC.
+    # Keep the most recent measurement of each ESP32.
     latest_by_node = df.groupby("node_name", dropna=False, sort=False).head(1)
 
     detections = []
@@ -129,7 +152,6 @@ def detect():
 
         messages = diagnose(latest_row)
 
-        # Isolation Forest anomaly is also displayed as a detected problem.
         if prediction == -1:
             messages.insert(0, {
                 "text": "Comportement inhabituel détecté par Isolation Forest.",
