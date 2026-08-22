@@ -12,4 +12,23 @@ router.get("/ai/detect", async (req, res) => {
     }
 });
 
+// TEST MODE: send the fake ESP32 values from React to the AI service.
+router.post("/ai/detect-test", async (req, res) => {
+    try {
+        const response = await fetch("http://localhost:5000/detect-test", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(req.body),
+        });
+
+        const data = await response.json();
+        res.status(response.status).json(data);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "AI service unreachable" });
+    }
+});
+
 module.exports = router;
