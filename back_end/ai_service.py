@@ -122,8 +122,8 @@ def diagnose(latest_row):
         })
 
     # Humidity detection only — never used by Isolation Forest.
-    # In TEST MODE, "Humid environment" is considered normal.
-    # "Dry environment" is considered an abnormal condition.
+    # In TEST MODE the frontend uses 0 = "Humid environment" (normal)
+    # and 1 = "Dry environment" (warning).
     humidity_value = latest_row["humidity"]
     if pd.notna(humidity_value):
         humidity_text = str(humidity_value).strip().lower()
@@ -244,6 +244,17 @@ def detect_test():
         sensor = node.get("sensor", {})
         network = node.get("network", {})
 
+        # The TEST MODE frontend represents humidity as a state:
+        # 0 = Humid environment (normal)
+        # 1 = Dry environment (warning)
+        fake_humidity = sensor.get("humidity")
+        if fake_humidity == 0:
+            humidity_for_detection = "Humid environment"
+        elif fake_humidity == 1:
+            humidity_for_detection = "Dry environment"
+        else:
+            humidity_for_detection = fake_humidity
+
         rows.append({
             "node_name": node_name,
             "used_ram": float(system.get("used_ram", 0)),
@@ -252,7 +263,7 @@ def detect_test():
             "external_temperature": float(sensor.get("external_temperature", 0)),
             "wifi_signal": float(network.get("wifi_signal", 0)),
             "gas_level": float(sensor.get("gas_level", 0)),
-            "humidity": sensor.get("humidity"),
+            "humidity": humidity_for_detection,
         })
 
     if not rows:
