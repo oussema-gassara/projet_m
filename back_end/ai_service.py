@@ -18,11 +18,18 @@ DB_CONFIG = {
 
 # AI is ESP32-only for now.
 # Raspberry Pi data is intentionally not queried here.
-FEATURES = [
+
+# Features used ONLY by Isolation Forest prediction.
+PREDICTION_FEATURES = [
     "used_ram",
     "cpu_temperature",
     "wifi_signal",
     "external_temperature",
+]
+
+# Detection-only values. They generate explicit alerts but never
+# influence the Isolation Forest model.
+DETECTION_FEATURES = [
     "humidity",
     "gas_level",
 ]
@@ -31,8 +38,10 @@ FEATURES = [
 def get_recent_data(limit=200):
     conn = mysql.connector.connect(**DB_CONFIG)
 
+    columns = PREDICTION_FEATURES + DETECTION_FEATURES + ["total_ram"]
+
     query = f"""
-        SELECT node_name, {", ".join(FEATURES)}, total_ram
+        SELECT node_name, {", ".join(columns)}
         FROM monitoring_data
         WHERE node_name IS NOT NULL
           AND node_name LIKE 'esp32%'
@@ -43,7 +52,7 @@ def get_recent_data(limit=200):
     df = pd.read_sql(query, conn)
     conn.close()
 
-    return df.dropna(subset=FEATURES + ["total_ram"])
+    return df.dropna(subset=PREDICTION_FEATURES + ["total_ram"])
 
 
 def diagnose(latest_row):
@@ -103,6 +112,7 @@ def diagnose(latest_row):
             "level": "warning"
         })
 
+    # Gas detection only — never used by Isolation Forest.
     if gas_level >= 600:
         messages.append({
             "text": "Niveau de gaz critique — vérifiez immédiatement l'environnement et le capteur MQ-2.",
@@ -113,6 +123,24 @@ def diagnose(latest_row):
             "text": "Niveau de gaz élevé — surveillez le capteur MQ-2.",
             "level": "warning"
         })
+
+    # Humidity detection only — never used by Isolation Forest.
+    humidity_value = latest_row["humidity"]
+    if pd.notna(humidity_value):
+        try:
+            humidity = float(humidity_value)
+            if humidity < 30 or humidity > 70:
+                messages.append({
+                    "text": "Humidité hors de la plage normale — vérifiez les conditions ambiantes.",
+                    "level": "warning"
+                })
+        except (TypeError, ValueError):
+            humidity_text = str(humidity_value).lower()
+            if "dry" in humidity_text or "humid" in humidity_text:
+                messages.append({
+                    "text": "Humidité ambiante à surveiller.",
+                    "level": "warning"
+                })
 
     return messages
 
@@ -130,9 +158,9 @@ def detect():
             "messages": [],
         })
 
-    # Train Isolation Forest on ESP32 monitoring history only.
+    # IMPORTANT: Isolation Forest uses ONLY prediction features.
     model = IsolationForest(contamination=0.05, random_state=42)
-    model.fit(df[FEATURES])
+    model.fit(df[PREDICTION_FEATURES])
 
     # Keep the most recent measurement of each ESP32.
     latest_by_node = df.groupby("node_name", dropna=False, sort=False).head(1)
@@ -140,10 +168,13 @@ def detect():
     detections = []
 
     for _, latest_row in latest_by_node.iterrows():
-        latest_values = latest_row[FEATURES].to_dict()
+        latest_values = latest_row[PREDICTION_FEATURES + DETECTION_FEATURES].to_dict()
         latest_values["total_ram"] = latest_row["total_ram"]
 
-        latest_for_model = pd.DataFrame([latest_row[FEATURES].to_dict()])
+        # Prediction uses ONLY PREDICTION_FEATURES.
+        latest_for_model = pd.DataFrame([
+            latest_row[PREDICTION_FEATURES].to_dict()
+        ])
         prediction = model.predict(latest_for_model)[0]
         score = model.decision_function(latest_for_model)[0]
 
