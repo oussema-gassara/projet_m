@@ -19,7 +19,6 @@ DB_CONFIG = {
 # AI is ESP32-only for now.
 # Raspberry Pi data is intentionally not queried here.
 
-# Features used ONLY by Isolation Forest prediction.
 PREDICTION_FEATURES = [
     "used_ram",
     "cpu_temperature",
@@ -27,8 +26,6 @@ PREDICTION_FEATURES = [
     "external_temperature",
 ]
 
-# Detection-only values. They generate explicit alerts but never
-# influence the Isolation Forest model.
 DETECTION_FEATURES = [
     "humidity",
     "gas_level",
@@ -125,9 +122,12 @@ def diagnose(latest_row):
         })
 
     # Humidity detection only — never used by Isolation Forest.
+    # In TEST MODE, "Humid environment" is considered normal.
+    # "Dry environment" is considered an abnormal condition.
     humidity_value = latest_row["humidity"]
     if pd.notna(humidity_value):
-        humidity_text = str(humidity_value).lower()
+        humidity_text = str(humidity_value).strip().lower()
+
         try:
             humidity = float(humidity_value)
             if humidity < 30 or humidity > 70:
@@ -136,11 +136,12 @@ def diagnose(latest_row):
                     "level": "warning"
                 })
         except (TypeError, ValueError):
-            if "dry" in humidity_text or "humid" in humidity_text:
+            if "dry" in humidity_text:
                 messages.append({
-                    "text": "Humidité ambiante à surveiller.",
+                    "text": "Environnement trop sec — vérifiez les conditions ambiantes.",
                     "level": "warning"
                 })
+            # "humid environment" is intentionally treated as normal.
 
     return messages
 
@@ -150,8 +151,6 @@ def run_isolation_forest(df):
     if len(df) < 2:
         return [1] * len(df), [0.0] * len(df)
 
-    # auto works for a small TEST MODE dataset and avoids requiring
-    # 20+ historical rows just to demonstrate the model.
     model = IsolationForest(contamination="auto", random_state=42)
     model.fit(df[PREDICTION_FEATURES])
 
@@ -163,7 +162,6 @@ def run_isolation_forest(df):
 def build_detections(df):
     predictions, scores = run_isolation_forest(df)
 
-    # The input is already ordered newest-first for real data.
     latest_by_node = df.groupby("node_name", dropna=False, sort=False).head(1)
 
     detections = []
@@ -175,7 +173,6 @@ def build_detections(df):
         latest_values = latest_row[PREDICTION_FEATURES + DETECTION_FEATURES].to_dict()
         latest_values["total_ram"] = latest_row["total_ram"]
 
-        # Find this row's model result without ever adding gas/humidity.
         row_position = df.index.get_loc(index)
         prediction = predictions[row_position]
         score = scores[row_position]
@@ -239,7 +236,6 @@ def detect_test():
         if not isinstance(node, dict):
             continue
 
-        # Only ESP32 nodes are accepted in TEST MODE.
         node_name = str(node.get("node_name", ""))
         if not node_name.lower().startswith("esp32"):
             continue
@@ -256,8 +252,6 @@ def detect_test():
             "external_temperature": float(sensor.get("external_temperature", 0)),
             "wifi_signal": float(network.get("wifi_signal", 0)),
             "gas_level": float(sensor.get("gas_level", 0)),
-            # fakeData uses 0 = humid environment and 1 = dry environment.
-            # Keep this as detection-only metadata.
             "humidity": sensor.get("humidity"),
         })
 
