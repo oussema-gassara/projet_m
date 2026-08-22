@@ -191,7 +191,10 @@ export default function Main() {
             </div>
 
             <div className="ai">
-                <Ai />
+                <Ai
+                    testMode={testMode}
+                    testNodes={espNodes}
+                />
             </div>
         </>
     );
