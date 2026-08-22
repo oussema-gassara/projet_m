@@ -110,38 +110,52 @@ def diagnose(latest_row):
         })
 
     # Gas detection only — never used by Isolation Forest.
-    if gas_level >= 600:
+    # Same thresholds as the ESP32 dashboard:
+    # <300 normal, 300-600 warning, >600 danger.
+    if gas_level > 600:
         messages.append({
             "text": "Niveau de gaz critique — vérifiez immédiatement l'environnement et le capteur MQ-2.",
             "level": "danger"
         })
-    elif gas_level >= 400:
+    elif gas_level >= 300:
         messages.append({
             "text": "Niveau de gaz élevé — surveillez le capteur MQ-2.",
             "level": "warning"
         })
 
     # Humidity detection only — never used by Isolation Forest.
-    # In TEST MODE the frontend uses 0 = "Humid environment" (normal)
-    # and 1 = "Dry environment" (warning).
+    # ESP32 encodes humidity as a state:
+    # 0 = Humid environment (normal)
+    # 1 = Dry environment (warning)
+    # If a real numeric percentage is ever received, use 30-70% as normal.
     humidity_value = latest_row["humidity"]
     if pd.notna(humidity_value):
         humidity_text = str(humidity_value).strip().lower()
 
-        try:
-            humidity = float(humidity_value)
-            if humidity < 30 or humidity > 70:
-                messages.append({
-                    "text": "Humidité hors de la plage normale — vérifiez les conditions ambiantes.",
-                    "level": "warning"
-                })
-        except (TypeError, ValueError):
-            if "dry" in humidity_text:
-                messages.append({
-                    "text": "Environnement trop sec — vérifiez les conditions ambiantes.",
-                    "level": "warning"
-                })
-            # "humid environment" is intentionally treated as normal.
+        if humidity_text in ("humid environment", "humid"):
+            pass
+        elif humidity_text in ("dry environment", "dry"):
+            messages.append({
+                "text": "Environnement trop sec — vérifiez les conditions ambiantes.",
+                "level": "warning"
+            })
+        else:
+            try:
+                humidity = float(humidity_value)
+                if humidity == 0:
+                    pass
+                elif humidity == 1:
+                    messages.append({
+                        "text": "Environnement trop sec — vérifiez les conditions ambiantes.",
+                        "level": "warning"
+                    })
+                elif humidity < 30 or humidity > 70:
+                    messages.append({
+                        "text": "Humidité hors de la plage normale — vérifiez les conditions ambiantes.",
+                        "level": "warning"
+                    })
+            except (TypeError, ValueError):
+                pass
 
     return messages
 
@@ -244,9 +258,7 @@ def detect_test():
         sensor = node.get("sensor", {})
         network = node.get("network", {})
 
-        # The TEST MODE frontend represents humidity as a state:
-        # 0 = Humid environment (normal)
-        # 1 = Dry environment (warning)
+        # TEST MODE humidity encoding: 0 = humid/normal, 1 = dry/warning.
         fake_humidity = sensor.get("humidity")
         if fake_humidity == 0:
             humidity_for_detection = "Humid environment"
