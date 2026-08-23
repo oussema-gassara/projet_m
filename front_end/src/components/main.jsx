@@ -140,17 +140,17 @@ export default function Main() {
                         fontWeight: "bold",
                     }}
                 >
-                    TEST MODE: {testMode ? "ON" : "OFF"}
+                    MODE TEST : {testMode ? "ACTIVÉ" : "DÉSACTIVÉ"}
                 </button>
                 <p style={{ margin: "6px 0" }}>
                     {testMode
-                        ? "Using fake monitoring values"
-                        : "Using real ESP32/backend data"}
+                        ? "Utilisation de valeurs de surveillance simulées"
+                        : "Utilisation des données réelles des ESP32 et du serveur"}
                 </p>
             </div>
 
             <h1 style={{ textAlign: "center", width: "100%" }}>
-                ESP32 Monitoring
+                Surveillance des ESP32
             </h1>
 
             {nodesError && <p className="metric-danger">{nodesError}</p>}
@@ -173,7 +173,7 @@ export default function Main() {
             {isAdmin && <AddNode nodeType="esp32" onAdded={loadNodes} />}
 
             <h1 style={{ textAlign: "center", width: "100%" }}>
-                Raspberry Pi Monitoring
+                Surveillance des Raspberry Pi
             </h1>
 
             <div className="rasberry">
