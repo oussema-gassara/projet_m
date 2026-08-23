@@ -6,6 +6,7 @@ import EspNodeCard from "./EspNodeCard.jsx";
 import Rasberry from "./rasberry.jsx";
 import Security from "./security.jsx";
 import Ai from "./AiDetection.jsx";
+import Prediction from "./Prediction.jsx";
 import DangerControl from "./dangerControl.jsx";
 import AddNode from "./AddNode.jsx";
 import { fakeNodes } from "./fakeData.js";
@@ -58,7 +59,6 @@ export default function Main() {
 
         if (!confirmed) return;
 
-        // In TEST MODE, remove only the fake card from the current dashboard.
         if (testMode) {
             setEspNodes((current) =>
                 current.filter((item) => item.node_name !== node.node_name)
@@ -192,6 +192,13 @@ export default function Main() {
 
             <div className="ai">
                 <Ai
+                    testMode={testMode}
+                    testNodes={espNodes}
+                />
+            </div>
+
+            <div className="prediction">
+                <Prediction
                     testMode={testMode}
                     testNodes={espNodes}
                 />
