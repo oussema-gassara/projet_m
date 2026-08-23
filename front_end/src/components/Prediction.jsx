@@ -1,6 +1,92 @@
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 
+const metricLabels = {
+    cpu_temperature: "Température CPU",
+    external_temperature: "Température externe",
+    ram_usage_percent: "Utilisation RAM",
+};
+
+function MetricPrediction({ metricKey, metric }) {
+    if (!metric?.available) {
+        return (
+            <div className="prediction-metric">
+                <h4>{metricLabels[metricKey]}</h4>
+                <p>{metric?.reason || "Prédiction indisponible"}</p>
+                <p>Données utilisées : {metric?.rows_used ?? 0}</p>
+            </div>
+        );
+    }
+
+    const current = Number(metric.current);
+    const predicted = Number(metric.predicted_5min);
+    const trend = Number(metric.trend_per_minute);
+    const rising = trend > 0;
+
+    const isRam = metricKey === "ram_usage_percent";
+    const dangerLimit = isRam ? 90 : metricKey === "cpu_temperature" ? 80 : 40;
+    const warningLimit = isRam ? 70 : metricKey === "cpu_temperature" ? 60 : 30;
+    const unit = metric.unit || "";
+    const predictedDanger = predicted >= dangerLimit;
+    const predictedWarning = predicted >= warningLimit;
+
+    return (
+        <div className="prediction-metric">
+            <h4>{metricLabels[metricKey]}</h4>
+
+            <p>
+                Valeur actuelle: <strong>{current.toFixed(2)} {unit}</strong>
+            </p>
+
+            <p>
+                Prévue dans 5 min: {" "}
+                <strong className={clsx(
+                    predictedDanger
+                        ? "metric-danger"
+                        : predictedWarning
+                            ? "metric-warning"
+                            : "metric-good"
+                )}>
+                    {predicted.toFixed(2)} {unit}
+                </strong>
+            </p>
+
+            <p>
+                Tendance: <strong>{rising ? "Hausse" : "Baisse / stable"}</strong>
+            </p>
+
+            <p>
+                Variation estimée: <strong>{trend.toFixed(3)} {unit}/min</strong>
+            </p>
+
+            <p>Données historiques utilisées: {metric.rows_used}</p>
+
+            {predictedDanger ? (
+                <p className="metric-danger">
+                    ⚠ La valeur prévue atteint un niveau critique dans les prochaines minutes.
+                </p>
+            ) : predictedWarning ? (
+                <p className="metric-warning">
+                    ⚠ La valeur prévue atteint un niveau de surveillance.
+                </p>
+            ) : (
+                <p className="metric-good">
+                    ✓ Aucune valeur critique prévue à l'horizon de 5 minutes.
+                </p>
+            )}
+
+            <h5>Prévisions</h5>
+            <ul>
+                {metric.forecast.map((point) => (
+                    <li key={point.minutes_ahead}>
+                        +{point.minutes_ahead} min: {Number(point.value).toFixed(2)} {unit}
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+}
+
 export default function Prediction({ testMode = false }) {
     const [forecasts, setForecasts] = useState([]);
     const [error, setError] = useState("");
@@ -9,8 +95,7 @@ export default function Prediction({ testMode = false }) {
         let cancelled = false;
 
         const loadForecasts = async () => {
-            // Forecasting is intentionally based on real historical data.
-            // Fake TEST MODE values are not used to train or forecast the future.
+            // Future prediction uses only real historical ESP32 data.
             if (testMode) {
                 setForecasts([]);
                 setError("");
@@ -54,86 +139,39 @@ export default function Prediction({ testMode = false }) {
 
             {testMode ? (
                 <p>
-                    La prédiction future utilise uniquement les données
-                    historiques réelles des ESP32. Désactivez le TEST MODE
-                    pour afficher les prévisions.
+                    La prédiction future utilise uniquement les données historiques
+                    réelles des ESP32. Désactivez le TEST MODE pour afficher les prévisions.
                 </p>
             ) : error ? (
                 <p className="metric-danger">{error}</p>
             ) : forecasts.length === 0 ? (
                 <p>
-                    Pas encore assez de données historiques pour effectuer
-                    une prédiction.
+                    Pas encore assez de données historiques pour effectuer une prédiction.
                 </p>
             ) : (
                 <div className="prediction-cards">
-                    {forecasts.map((node) => {
-                        if (!node.available) {
-                            return (
-                                <div className="prediction-card" key={node.node_name}>
-                                    <h3>{node.node_name}</h3>
-                                    <p>{node.reason}</p>
-                                    <p>Données utilisées : {node.rows_used}</p>
-                                </div>
-                            );
-                        }
+                    {forecasts.map((node) => (
+                        <div className="prediction-card" key={node.node_name}>
+                            <h3>{node.node_name}</h3>
 
-                        const current = Number(node.current_cpu_temperature);
-                        const predicted = Number(node.predicted_cpu_temperature_5min);
-                        const rising = Number(node.trend_per_minute) > 0;
-                        const risk = predicted >= 80;
+                            <MetricPrediction
+                                metricKey="cpu_temperature"
+                                metric={node.forecasts?.cpu_temperature}
+                            />
 
-                        return (
-                            <div className="prediction-card" key={node.node_name}>
-                                <h3>{node.node_name}</h3>
+                            <MetricPrediction
+                                metricKey="external_temperature"
+                                metric={node.forecasts?.external_temperature}
+                            />
 
-                                <p>
-                                    Température CPU actuelle : {" "}
-                                    <strong>{current.toFixed(2)} °C</strong>
-                                </p>
+                            <MetricPrediction
+                                metricKey="ram_usage_percent"
+                                metric={node.forecasts?.ram_usage_percent}
+                            />
 
-                                <p>
-                                    Température CPU prévue dans 5 min : {" "}
-                                    <strong className={clsx(risk ? "metric-danger" : "metric-good")}>
-                                        {predicted.toFixed(2)} °C
-                                    </strong>
-                                </p>
-
-                                <p>
-                                    Tendance : {" "}
-                                    <strong>{rising ? "Hausse" : "Baisse / stable"}</strong>
-                                </p>
-
-                                <p>
-                                    Variation estimée : {" "}
-                                    <strong>{Number(node.trend_per_minute).toFixed(3)} °C/min</strong>
-                                </p>
-
-                                <p>Données historiques utilisées : {node.rows_used}</p>
-
-                                {risk ? (
-                                    <p className="metric-danger">
-                                        ⚠ Température susceptible de dépasser 80 °C dans les prochaines minutes.
-                                    </p>
-                                ) : (
-                                    <p className="metric-good">
-                                        ✓ Aucune surchauffe prévue à l'horizon de 5 minutes.
-                                    </p>
-                                )}
-
-                                <h4>Prévisions</h4>
-                                <ul>
-                                    {node.forecast.map((point) => (
-                                        <li key={point.minutes_ahead}>
-                                            +{point.minutes_ahead} min : {point.predicted_cpu_temperature.toFixed(2)} °C
-                                        </li>
-                                    ))}
-                                </ul>
-
-                                <small>Modèle : {node.model}</small>
-                            </div>
-                        );
-                    })}
+                            <small>Modèle: {node.model}</small>
+                        </div>
+                    ))}
                 </div>
             )}
         </div>
