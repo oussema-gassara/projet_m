@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import clsx from "clsx";
 
 const metricLabels = {
-    cpu_temperature: "Température CPU",
+    cpu_temperature: "Température du processeur",
     external_temperature: "Température externe",
-    ram_usage_percent: "Utilisation RAM",
+    ram_usage_percent: "Utilisation de la RAM",
 };
 
 function MetricPrediction({ metricKey, metric }) {
@@ -35,11 +35,11 @@ function MetricPrediction({ metricKey, metric }) {
             <h4>{metricLabels[metricKey]}</h4>
 
             <p>
-                Valeur actuelle: <strong>{current.toFixed(2)} {unit}</strong>
+                Valeur actuelle : <strong>{current.toFixed(2)} {unit}</strong>
             </p>
 
             <p>
-                Prévue dans 5 min: {" "}
+                Prévue dans 5 min : {" "}
                 <strong className={clsx(
                     predictedDanger
                         ? "metric-danger"
@@ -52,14 +52,14 @@ function MetricPrediction({ metricKey, metric }) {
             </p>
 
             <p>
-                Tendance: <strong>{rising ? "Hausse" : "Baisse / stable"}</strong>
+                Tendance : <strong>{rising ? "Hausse" : "Baisse / stable"}</strong>
             </p>
 
             <p>
-                Variation estimée: <strong>{trend.toFixed(3)} {unit}/min</strong>
+                Variation estimée : <strong>{trend.toFixed(3)} {unit}/min</strong>
             </p>
 
-            <p>Données historiques utilisées: {metric.rows_used}</p>
+            <p>Données historiques utilisées : {metric.rows_used}</p>
 
             {predictedDanger ? (
                 <p className="metric-danger">
@@ -67,11 +67,11 @@ function MetricPrediction({ metricKey, metric }) {
                 </p>
             ) : predictedWarning ? (
                 <p className="metric-warning">
-                    ⚠ La valeur prévue atteint un niveau de surveillance.
+                    ⚠ La valeur prévue atteint un niveau nécessitant une surveillance.
                 </p>
             ) : (
                 <p className="metric-good">
-                    ✓ Aucune valeur critique prévue à l'horizon de 5 minutes.
+                    ✓ Aucune valeur critique prévue dans les 5 prochaines minutes.
                 </p>
             )}
 
@@ -79,7 +79,7 @@ function MetricPrediction({ metricKey, metric }) {
             <ul>
                 {metric.forecast.map((point) => (
                     <li key={point.minutes_ahead}>
-                        +{point.minutes_ahead} min: {Number(point.value).toFixed(2)} {unit}
+                        +{point.minutes_ahead} min : {Number(point.value).toFixed(2)} {unit}
                     </li>
                 ))}
             </ul>
@@ -95,7 +95,7 @@ export default function Prediction({ testMode = false }) {
         let cancelled = false;
 
         const loadForecasts = async () => {
-            // Future prediction uses only real historical ESP32 data.
+            // Les prévisions utilisent uniquement les données historiques réelles des ESP32.
             if (testMode) {
                 setForecasts([]);
                 setError("");
@@ -134,13 +134,13 @@ export default function Prediction({ testMode = false }) {
 
     return (
         <div className="prediction-control">
-            <h2>Prediction</h2>
+            <h2>Prédiction</h2>
             <hr />
 
             {testMode ? (
                 <p>
                     La prédiction future utilise uniquement les données historiques
-                    réelles des ESP32. Désactivez le TEST MODE pour afficher les prévisions.
+                    réelles des ESP32. Désactivez le mode TEST pour afficher les prévisions.
                 </p>
             ) : error ? (
                 <p className="metric-danger">{error}</p>
@@ -169,7 +169,7 @@ export default function Prediction({ testMode = false }) {
                                 metric={node.forecasts?.ram_usage_percent}
                             />
 
-                            <small>Modèle: {node.model}</small>
+                            <small>Modèle : {node.model}</small>
                         </div>
                     ))}
                 </div>
