@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fakeNodes } from "./fakeData.js";
+import { API_URL } from "../config.js";
 
 export default function NodeList({ nodeType = "esp32", testMode = false, onNodesChange }) {
     const [nodes, setNodes] = useState([]);
@@ -15,7 +16,7 @@ export default function NodeList({ nodeType = "esp32", testMode = false, onNodes
         }
 
         try {
-            const response = await fetch("http://localhost:3000/api/nodes");
+            const response = await fetch(`${API_URL}/api/nodes`);
 
             if (!response.ok) {
                 throw new Error("Erreur serveur");

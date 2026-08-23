@@ -10,6 +10,7 @@ import Prediction from "./Prediction.jsx";
 import DangerControl from "./dangerControl.jsx";
 import AddNode from "./AddNode.jsx";
 import { fakeNodes } from "./fakeData.js";
+import { API_URL } from "../config.js";
 
 export default function Main() {
     const [isAdmin, setIsAdmin] = useState(
@@ -28,7 +29,7 @@ export default function Main() {
         }
 
         try {
-            const response = await fetch("http://localhost:3000/api/nodes");
+            const response = await fetch(`${API_URL}/api/nodes`);
 
             if (!response.ok) {
                 throw new Error("Erreur serveur");
@@ -70,7 +71,7 @@ export default function Main() {
             const token = localStorage.getItem("token");
 
             const response = await fetch(
-                `http://localhost:3000/api/nodes/${node.id}`,
+                `${API_URL}/api/nodes/${node.id}`,
                 {
                     method: "DELETE",
                     headers: {

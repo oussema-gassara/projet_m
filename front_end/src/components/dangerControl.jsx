@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import clsx from "clsx";
+import { API_URL } from "../config.js";
 
 export default function DangerControl() {
     const [dangers, setDangers] = useState(null);
 
     useEffect(() => {
         const getDangers = () => {
-            fetch("http://localhost:3000/api/dangers")
+            fetch(`${API_URL}/api/dangers`)
                 .then((res) => res.json())
                 .then((data) => setDangers(data))
                 .catch((err) => console.error(err));

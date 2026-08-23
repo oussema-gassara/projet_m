@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import clsx from "clsx";
 import { fakeNodeData } from "./fakeData.js";
+import { API_URL } from "../config.js";
 
 const numberOrNull = (value) => {
     const number = Number(value);
@@ -17,7 +18,7 @@ export default function SensorControl({ nodeName = "esp32-1", testMode = false }
         }
 
         const getSensor = () => {
-            fetch(`http://localhost:3000/api/sensors?node_name=${encodeURIComponent(nodeName)}`)
+            fetch(`${API_URL}/api/sensors?node_name=${encodeURIComponent(nodeName)}`)
                 .then(res => res.json())
                 .then(data => setSensor(data))
                 .catch(err => console.error(err));

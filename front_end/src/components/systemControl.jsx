@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import clsx from "clsx";
 import SystemStatus from "./SystemStatus.jsx";
 import { fakeNodeData } from "./fakeData.js";
+import { API_URL } from "../config.js";
 
 const getLevel = (value, warnAt, dangerAt) => {
     if (!Number.isFinite(value)) return "good";
@@ -30,7 +31,7 @@ export default function SystemControl({ nodeName = "esp32-1", testMode = false }
         }
 
         const getSystem = () => {
-            fetch(`http://localhost:3000/api/system?node_name=${encodeURIComponent(nodeName)}`)
+            fetch(`${API_URL}/api/system?node_name=${encodeURIComponent(nodeName)}`)
                 .then((res) => res.json())
                 .then((data) => setSystem(data))
                 .catch((err) => console.error(err));

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import RasberryStatus from "./rasberryStatus.jsx";
 import clsx from "clsx";
+import { API_URL } from "../config.js";
 
 export default function Rasberry() {
 
@@ -12,7 +13,7 @@ export default function Rasberry() {
 
             const token = localStorage.getItem("token");
 
-            fetch("http://localhost:3000/api/pi", {
+            fetch(`${API_URL}/api/pi`, {
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
             })
                 .then(res => res.json())

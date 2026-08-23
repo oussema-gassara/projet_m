@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import clsx from "clsx";
 import { fakeNodeData } from "./fakeData.js";
+import { API_URL } from "../config.js";
 
 export default function AiDetection({ testMode = false, testNodes = [] }) {
     const [ai, setAi] = useState(null);
@@ -26,7 +27,7 @@ export default function AiDetection({ testMode = false, testNodes = [] }) {
                         })
                         .filter(Boolean);
 
-                    response = await fetch("http://localhost:3000/api/ai/detect-test", {
+                    response = await fetch(`${API_URL}/api/ai/detect-test`, {
                         method: "POST",
                         headers: {
                             "Content-Type": "application/json",
@@ -34,7 +35,7 @@ export default function AiDetection({ testMode = false, testNodes = [] }) {
                         body: JSON.stringify({ nodes }),
                     });
                 } else {
-                    response = await fetch("http://localhost:3000/api/ai/detect");
+                    response = await fetch(`${API_URL}/api/ai/detect`);
                 }
 
                 const data = await response.json();

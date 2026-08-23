@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import clsx from "clsx";
+import { API_URL } from "../config.js";
 
 const metricLabels = {
     cpu_temperature: "Température du processeur",
@@ -103,7 +104,7 @@ export default function Prediction({ testMode = false }) {
             }
 
             try {
-                const response = await fetch("http://localhost:3000/api/ai/forecast");
+                const response = await fetch(`${API_URL}/api/ai/forecast`);
                 const data = await response.json();
 
                 if (!response.ok) {

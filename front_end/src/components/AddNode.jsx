@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { API_URL } from "../config.js";
 
 export default function AddNode({ nodeType, onAdded }) {
     const [open, setOpen] = useState(false);
@@ -13,7 +14,7 @@ export default function AddNode({ nodeType, onAdded }) {
 
         const token = localStorage.getItem("token");
 
-        fetch("http://localhost:3000/api/nodes", {
+        fetch(`${API_URL}/api/nodes`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import logo from "../assets/logo.svg";
+import { API_URL } from "../config.js";
 export default function Login({ onLogin }) {
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
@@ -17,7 +18,7 @@ export default function Login({ onLogin }) {
 
         try {
             const response = await fetch(
-                "http://localhost:3000/api/auth/login",
+                `${API_URL}/api/auth/login`,
                 {
                     method: "POST",
                     headers: {

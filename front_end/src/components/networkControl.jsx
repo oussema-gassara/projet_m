@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import clsx from "clsx";
 import { fakeNodeData } from "./fakeData.js";
+import { API_URL } from "../config.js";
 
 export default function NetworkControl({ nodeName = "esp32-1", testMode = false }) {
     const [network, setNetwork] = useState(null);
@@ -16,7 +17,7 @@ export default function NetworkControl({ nodeName = "esp32-1", testMode = false 
         const getNetwork = () => {
             const token = localStorage.getItem("token");
 
-            fetch(`http://localhost:3000/api/network?node_name=${encodeURIComponent(nodeName)}`, {
+            fetch(`${API_URL}/api/network?node_name=${encodeURIComponent(nodeName)}`, {
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
             })
                 .then((res) => {

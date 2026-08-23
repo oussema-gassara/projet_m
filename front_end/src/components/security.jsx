@@ -1,12 +1,13 @@
 import clsx from 'clsx';
 import { useState, useEffect } from "react";
+import { API_URL } from "../config.js";
 
 export default function Security() {
     const [security, setSecurity] = useState(null);
 
     useEffect(() => {
         const getSecurity = () => {
-            fetch('http://localhost:3000/api/security')
+            fetch(`${API_URL}/api/security`)
                 .then((res) => res.json())
                 .then((data) => setSecurity(data))
                 .catch((err) => console.error(err));
