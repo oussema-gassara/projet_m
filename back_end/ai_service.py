@@ -2,6 +2,7 @@ from flask import Flask, jsonify, request
 import mysql.connector
 import pandas as pd
 from sklearn.ensemble import IsolationForest
+from sklearn.linear_model import LinearRegression
 from dotenv import load_dotenv
 import os
 
@@ -52,6 +53,97 @@ def get_recent_data(limit=200):
     return df.dropna(subset=PREDICTION_FEATURES + ["total_ram"])
 
 
+def get_forecast_data(node_name, limit=120):
+    """Get timestamped real measurements for one ESP32 node."""
+    conn = mysql.connector.connect(**DB_CONFIG)
+
+    query = """
+        SELECT created_at, cpu_temperature
+        FROM monitoring_data
+        WHERE node_name = %s
+          AND node_name LIKE 'esp32%'
+          AND cpu_temperature IS NOT NULL
+        ORDER BY created_at DESC
+        LIMIT %s
+    """
+
+    df = pd.read_sql(query, conn, params=(node_name, limit))
+    conn.close()
+
+    if df.empty:
+        return df
+
+    df["created_at"] = pd.to_datetime(df["created_at"])
+    df["cpu_temperature"] = pd.to_numeric(df["cpu_temperature"], errors="coerce")
+    df = df.dropna(subset=["created_at", "cpu_temperature"])
+    return df.sort_values("created_at").reset_index(drop=True)
+
+
+def forecast_cpu_temperature(node_name, horizon_minutes=5):
+    """Forecast future CPU temperature from real historical ESP32 data.
+
+    A time-trend Linear Regression is intentionally used here instead of
+    Isolation Forest: this endpoint predicts future values rather than
+    detecting current anomalies.
+    """
+    df = get_forecast_data(node_name)
+
+    if len(df) < 20:
+        return {
+            "node_name": node_name,
+            "available": False,
+            "reason": "Pas encore assez de données historiques",
+            "rows_used": len(df),
+            "forecast": [],
+        }
+
+    # Use seconds from the first sample as the time variable.
+    elapsed_seconds = (
+        df["created_at"] - df["created_at"].iloc[0]
+    ).dt.total_seconds().to_numpy()
+    temperatures = df["cpu_temperature"].to_numpy()
+
+    # If all timestamps are identical, a time forecast cannot be fitted.
+    if elapsed_seconds[-1] <= elapsed_seconds[0]:
+        return {
+            "node_name": node_name,
+            "available": False,
+            "reason": "Les données historiques ne contiennent pas assez de variation temporelle",
+            "rows_used": len(df),
+            "forecast": [],
+        }
+
+    model = LinearRegression()
+    model.fit(elapsed_seconds.reshape(-1, 1), temperatures)
+
+    last_time = elapsed_seconds[-1]
+    future_minutes = [1, 2, 3, 4, 5]
+    future_seconds = last_time + (pd.Series(future_minutes).to_numpy() * 60)
+    predicted = model.predict(future_seconds.reshape(-1, 1))
+
+    forecast = [
+        {
+            "minutes_ahead": minute,
+            "predicted_cpu_temperature": round(float(temp), 2),
+        }
+        for minute, temp in zip(future_minutes, predicted)
+    ]
+
+    current_temp = float(df["cpu_temperature"].iloc[-1])
+    final_prediction = float(predicted[-1])
+
+    return {
+        "node_name": node_name,
+        "available": True,
+        "rows_used": len(df),
+        "current_cpu_temperature": round(current_temp, 2),
+        "predicted_cpu_temperature_5min": round(final_prediction, 2),
+        "trend_per_minute": round(float(model.coef_[0] * 60), 4),
+        "forecast": forecast,
+        "model": "Linear Regression (time-series trend)",
+    }
+
+
 def diagnose(latest_row):
     messages = []
 
@@ -86,7 +178,6 @@ def diagnose(latest_row):
             "level": "warning"
         })
 
-    # Wi-Fi RSSI: values closer to 0 are stronger.
     if wifi_signal < -80:
         messages.append({
             "text": "Signal Wi-Fi très faible — rapprochez l'ESP32 du routeur.",
@@ -110,8 +201,6 @@ def diagnose(latest_row):
         })
 
     # Gas detection only — never used by Isolation Forest.
-    # Same thresholds as the ESP32 dashboard:
-    # <300 normal, 300-600 warning, >600 danger.
     if gas_level > 600:
         messages.append({
             "text": "Niveau de gaz critique — vérifiez immédiatement l'environnement et le capteur MQ-2.",
@@ -124,10 +213,6 @@ def diagnose(latest_row):
         })
 
     # Humidity detection only — never used by Isolation Forest.
-    # ESP32 encodes humidity as a state:
-    # 0 = Humid environment (normal)
-    # 1 = Dry environment (warning)
-    # If a real numeric percentage is ever received, use 30-70% as normal.
     humidity_value = latest_row["humidity"]
     if pd.notna(humidity_value):
         humidity_text = str(humidity_value).strip().lower()
@@ -175,9 +260,7 @@ def run_isolation_forest(df):
 
 def build_detections(df):
     predictions, scores = run_isolation_forest(df)
-
     latest_by_node = df.groupby("node_name", dropna=False, sort=False).head(1)
-
     detections = []
 
     for index, latest_row in latest_by_node.iterrows():
@@ -190,7 +273,6 @@ def build_detections(df):
         row_position = df.index.get_loc(index)
         prediction = predictions[row_position]
         score = scores[row_position]
-
         messages = diagnose(latest_row)
 
         if prediction == -1:
@@ -232,6 +314,32 @@ def detect():
     })
 
 
+@app.route("/forecast", methods=["GET"])
+def forecast():
+    """Forecast CPU temperature for every real ESP32 node with enough history."""
+    conn = mysql.connector.connect(**DB_CONFIG)
+    query = """
+        SELECT DISTINCT node_name
+        FROM monitoring_data
+        WHERE node_name IS NOT NULL
+          AND node_name LIKE 'esp32%'
+        ORDER BY node_name
+    """
+    nodes_df = pd.read_sql(query, conn)
+    conn.close()
+
+    forecasts = [
+        forecast_cpu_temperature(str(node_name))
+        for node_name in nodes_df["node_name"].dropna().tolist()
+    ]
+
+    return jsonify({
+        "forecast_type": "future_cpu_temperature",
+        "horizon_minutes": 5,
+        "forecasts": forecasts,
+    })
+
+
 @app.route("/detect-test", methods=["POST"])
 def detect_test():
     """Analyze exactly the fake ESP32 values displayed by TEST MODE."""
@@ -239,13 +347,9 @@ def detect_test():
     nodes = payload.get("nodes", [])
 
     if not isinstance(nodes, list) or not nodes:
-        return jsonify({
-            "error": "Aucune donnée ESP32 de test reçue",
-            "detections": [],
-        }), 400
+        return jsonify({"error": "Aucune donnée ESP32 de test reçue", "detections": []}), 400
 
     rows = []
-
     for node in nodes:
         if not isinstance(node, dict):
             continue
@@ -258,7 +362,6 @@ def detect_test():
         sensor = node.get("sensor", {})
         network = node.get("network", {})
 
-        # TEST MODE humidity encoding: 0 = humid/normal, 1 = dry/warning.
         fake_humidity = sensor.get("humidity")
         if fake_humidity == 0:
             humidity_for_detection = "Humid environment"
@@ -279,10 +382,7 @@ def detect_test():
         })
 
     if not rows:
-        return jsonify({
-            "error": "Aucun nœud ESP32 de test valide",
-            "detections": [],
-        }), 400
+        return jsonify({"error": "Aucun nœud ESP32 de test valide", "detections": []}), 400
 
     df = pd.DataFrame(rows)
     detections = build_detections(df)
