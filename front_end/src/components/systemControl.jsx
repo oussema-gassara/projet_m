@@ -47,11 +47,11 @@ export default function SystemControl({ nodeName = "esp32-1", testMode = false }
                 <SystemStatus system={system} />
             </div>
             <div className="system-control">
-                <h2>System Control {testMode && "(TEST)"}</h2>
+                <h2>Contrôle du système {testMode && "(TEST)"}</h2>
                 <hr />
 
                 {!system ? (
-                    <p>Loading system data…</p>
+                    <p>Chargement des données système…</p>
                 ) : (
                     <>
                         {(() => {
@@ -59,7 +59,7 @@ export default function SystemControl({ nodeName = "esp32-1", testMode = false }
                             const level = getLevel(temp, 60, 80);
                             return (
                                 <p>
-                                    CPU Temperature:{" "}
+                                    Température du processeur:{" "}
                                     <span className={clsx("metric-value", {
                                         "metric-good": level === "good",
                                         "metric-warning": level === "warning",
@@ -72,10 +72,10 @@ export default function SystemControl({ nodeName = "esp32-1", testMode = false }
                         })()}
 
                         <hr />
-                        <p>Total RAM: {formatNumber(numberOrNull(system.total_ram) / 1024)} KB</p>
-                        <p>Free RAM: {formatNumber(numberOrNull(system.free_ram) / 1024)} KB</p>
-                        <p>Used RAM: {formatNumber(numberOrNull(system.used_ram) / 1024)} KB</p>
-                        <p>Minimum Free RAM: {formatNumber(numberOrNull(system.minimum_free_ram) / 1024)} KB</p>
+                        <p>RAM totale : {formatNumber(numberOrNull(system.total_ram) / 1024)} Ko</p>
+                        <p>RAM libre : {formatNumber(numberOrNull(system.free_ram) / 1024)} Ko</p>
+                        <p>RAM utilisée : {formatNumber(numberOrNull(system.used_ram) / 1024)} Ko</p>
+                        <p>RAM libre minimale : {formatNumber(numberOrNull(system.minimum_free_ram) / 1024)} Ko</p>
 
                         {(() => {
                             const used = numberOrNull(system.used_ram);
@@ -84,7 +84,7 @@ export default function SystemControl({ nodeName = "esp32-1", testMode = false }
                             const level = getLevel(usedPct, 70, 90);
                             return (
                                 <p>
-                                    Used RAM Percentage:{" "}
+                                    Pourcentage de RAM utilisée :{" "}
                                     <span className={clsx("metric-value", {
                                         "metric-good": level === "good",
                                         "metric-warning": level === "warning",
@@ -97,27 +97,27 @@ export default function SystemControl({ nodeName = "esp32-1", testMode = false }
                         })()}
 
                         <hr />
-                        <p>CPU Frequency: {system.cpu_frequency ?? "—"} MHz</p>
-                        <p>CPU Cores: {system.cpu_cores ?? "—"}</p>
-                        <p>Active Core: {system.active_core ?? "—"}</p>
+                        <p>Fréquence du processeur : {system.cpu_frequency ?? "—"} MHz</p>
+                        <p>Nombre de cœurs : {system.cpu_cores ?? "—"}</p>
+                        <p>Cœur actif : {system.active_core ?? "—"}</p>
 
                         <hr />
-                        <p>Chip Model: {system.chip_model || "—"}</p>
-                        <p>Chip Revision: {system.chip_revision ?? "—"}</p>
+                        <p>Modèle de la puce : {system.chip_model || "—"}</p>
+                        <p>Révision de la puce : {system.chip_revision ?? "—"}</p>
 
                         <hr />
-                        <p>Flash Size: {formatNumber(numberOrNull(system.flash_size) / 1024 / 1024)} MB</p>
-                        <p>Sketch Size: {formatNumber(numberOrNull(system.sketch_size) / 1024 / 1024)} MB</p>
+                        <p>Taille de la mémoire Flash : {formatNumber(numberOrNull(system.flash_size) / 1024 / 1024)} Mo</p>
+                        <p>Taille du programme : {formatNumber(numberOrNull(system.sketch_size) / 1024 / 1024)} Mo</p>
 
                         <hr />
-                        <p>SDK Version: {system.sdk_version || "—"}</p>
+                        <p>Version du SDK : {system.sdk_version || "—"}</p>
 
                         <hr />
-                        <p>Uptime: {system.uptime ?? "—"} seconds</p>
-                        <p>Reconnects: {system.reconnects ?? "—"}</p>
+                        <p>Temps de fonctionnement : {system.uptime ?? "—"} secondes</p>
+                        <p>Reconnexions : {system.reconnects ?? "—"}</p>
 
                         <hr />
-                        <p>Status: {system.status || "—"}</p>
+                        <p>État : {system.status || "—"}</p>
                     </>
                 )}
             </div>
