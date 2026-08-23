@@ -29,23 +29,21 @@ export default function SensorControl({ nodeName = "esp32-1", testMode = false }
     }, [testMode, nodeName]);
 
     if (!sensor) {
-        return <h2>Loading sensor data...</h2>;
+        return <h2>Chargement des données des capteurs...</h2>;
     }
 
     const externalTemp = numberOrNull(sensor.external_temperature);
     const gasLevel = numberOrNull(sensor.gas_level);
     const humidity = numberOrNull(sensor.humidity);
-
-    // ESP32 humidity encoding: 0 = Humid environment, 1 = Dry environment.
     const isDry = humidity === 1;
 
     return (
         <div className="sensor-control">
-            <h2>Sensor Control {testMode && "(TEST)"}</h2>
+            <h2>Contrôle des capteurs {testMode && "(TEST)"}</h2>
             <hr />
 
             <p>
-                External Temperature:{" "}
+                Température externe:{" "}
                 <span className={clsx("metric-value", {
                     "metric-good": externalTemp !== null && externalTemp < 30,
                     "metric-warning": externalTemp !== null && externalTemp >= 30 && externalTemp <= 40,
@@ -57,18 +55,18 @@ export default function SensorControl({ nodeName = "esp32-1", testMode = false }
             <hr />
 
             <p>
-                Humidity:{" "}
+                Humidité:{" "}
                 <span className={clsx("metric-value", {
                     "metric-good": !isDry,
                     "metric-danger": isDry,
                 })}>
-                    {humidity === null ? "—" : isDry ? "Dry environment" : "Humid environment"}
+                    {humidity === null ? "—" : isDry ? "Environnement sec" : "Environnement humide"}
                 </span>
             </p>
             <hr />
 
             <p>
-                Gas Level:{" "}
+                Niveau de gaz:{" "}
                 <span className={clsx("metric-value", {
                     "metric-good": gasLevel !== null && gasLevel < 300,
                     "metric-warning": gasLevel !== null && gasLevel >= 300 && gasLevel <= 600,
@@ -79,12 +77,12 @@ export default function SensorControl({ nodeName = "esp32-1", testMode = false }
             </p>
             <hr />
 
-            <p>Status: {sensor.status || "—"}</p>
+            <p>État : {sensor.status || "—"}</p>
             <hr />
             <p>
-                Gas Alarm: {sensor.gas_alarm === undefined || sensor.gas_alarm === null
+                Alarme de gaz : {sensor.gas_alarm === undefined || sensor.gas_alarm === null
                     ? "—"
-                    : Number(sensor.gas_alarm) ? "Normal Air" : "Alert: High Gas Level"}
+                    : Number(sensor.gas_alarm) ? "Air normal" : "Alerte : niveau de gaz élevé"}
             </p>
         </div>
     );
