@@ -116,6 +116,28 @@ export const fakeNodeData = {
             hostname: "ESP32-Monitor-3",
         },
     },
+
+    "raspberry-pi-1": {
+        pi: {
+            hostname: "raspberrypi",
+            ip_address: "192.168.1.150",
+            mac_address: "B8:27:EB:12:34:56",
+            wifi_status: "Connected",
+            cpu_temperature: 52,
+            cpu_usage_percent: 38,
+            total_ram: 4294967296,
+            free_ram: 1932735283,
+            used_ram: 2362232013,
+            used_ram_percent: 55,
+            disk_total: 32000000000,
+            disk_used: 12000000000,
+            disk_free: 20000000000,
+            disk_percent: 37.5,
+            uptime: 26400,
+            status: "NORMAL",
+            created_at: new Date().toISOString(),
+        },
+    },
 };
 
 export const fakeNodes = [

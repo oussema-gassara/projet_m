@@ -18,12 +18,15 @@ export default function Main() {
     );
 
     const [testMode, setTestMode] = useState(false);
-    const [espNodes, setEspNodes] = useState([]);
+    const [nodes, setNodes] = useState([]);
     const [nodesError, setNodesError] = useState("");
+
+    const espNodes = nodes.filter((n) => n.node_type === "esp32");
+    const piNodes = nodes.filter((n) => n.node_type === "raspberry");
 
     const loadNodes = useCallback(async () => {
         if (testMode) {
-            setEspNodes(fakeNodes.filter((n) => n.node_type === "esp32"));
+            setNodes(fakeNodes);
             setNodesError("");
             return;
         }
@@ -36,7 +39,7 @@ export default function Main() {
             }
 
             const data = await response.json();
-            setEspNodes(data.filter((n) => n.node_type === "esp32"));
+            setNodes(data);
             setNodesError("");
         } catch (error) {
             console.error(error);
@@ -61,7 +64,7 @@ export default function Main() {
         if (!confirmed) return;
 
         if (testMode) {
-            setEspNodes((current) =>
+            setNodes((current) =>
                 current.filter((item) => item.node_name !== node.node_name)
             );
             return;
@@ -86,7 +89,7 @@ export default function Main() {
                 throw new Error(data.error || "Erreur lors de la suppression");
             }
 
-            setEspNodes((current) =>
+            setNodes((current) =>
                 current.filter((item) => item.id !== node.id)
             );
         } catch (error) {
@@ -177,11 +180,22 @@ export default function Main() {
                 Surveillance des Raspberry Pi
             </h1>
 
-            <div className="rasberry">
-                <Rasberry />
+            {!nodesError && piNodes.length === 0 && (
+                <p style={{ textAlign: "center" }}>Aucun nœud Raspberry Pi enregistré.</p>
+            )}
+
+            <div className="rasberry-nodes-container">
+                {piNodes.map((node) => (
+                    <Rasberry
+                        key={node.id || node.node_name}
+                        node={node}
+                        testMode={testMode}
+                        onRemove={isAdmin ? handleRemoveNode : undefined}
+                    />
+                ))}
             </div>
 
-            {isAdmin && <AddNode nodeType="raspberry" />}
+            {isAdmin && <AddNode nodeType="raspberry" onAdded={loadNodes} />}
 
             <div className="security">
                 <Security />

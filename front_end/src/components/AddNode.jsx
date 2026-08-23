@@ -7,6 +7,7 @@ export default function AddNode({ nodeType, onAdded }) {
     const [error, setError] = useState("");
 
     const label = nodeType === "esp32" ? "Ajouter ESP32" : "Ajouter Raspberry Pi";
+    const placeholder = nodeType === "esp32" ? "Nom du nœud (ex: esp32-2)" : "Nom du nœud (ex: pi-2)";
 
     const handleAdd = (e) => {
         e.preventDefault();
@@ -48,7 +49,7 @@ export default function AddNode({ nodeType, onAdded }) {
         <form className="add-node-form" onSubmit={handleAdd}>
             <input
                 type="text"
-                placeholder="Nom du nœud (ex: esp32-2)"
+                placeholder={placeholder}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
             />

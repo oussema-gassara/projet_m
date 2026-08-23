@@ -2,22 +2,30 @@ import { useState, useEffect } from "react";
 import RasberryStatus from "./rasberryStatus.jsx";
 import clsx from "clsx";
 import { API_URL } from "../config.js";
+import { fakeNodeData } from "./fakeData.js";
 
-export default function Rasberry() {
+export default function Rasberry({ node, testMode = false, onRemove }) {
+
+    const nodeName = node.node_name;
 
     const [rasberry, setRasberry] = useState(null);
 
     useEffect(() => {
 
+        if (testMode) {
+            setRasberry(fakeNodeData[nodeName]?.pi || null);
+            return;
+        }
+
         const getRasberry = () => {
 
             const token = localStorage.getItem("token");
 
-            fetch(`${API_URL}/api/pi`, {
+            fetch(`${API_URL}/api/pi?node_name=${encodeURIComponent(nodeName)}`, {
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
             })
-                .then(res => res.json())
-                .then(data => setRasberry(data))
+                .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Erreur serveur"))))
+                .then(data => setRasberry(data || null))
                 .catch(err => console.error(err));
 
         };
@@ -28,7 +36,7 @@ export default function Rasberry() {
 
         return () => clearInterval(interval);
 
-    }, []);
+    }, [nodeName, testMode]);
 
     return (
         <div className="rasberry-main">
@@ -36,7 +44,19 @@ export default function Rasberry() {
                 <RasberryStatus rasberry={rasberry} />
             </div>
             <div className="rasberry-control">
-                <h2>Rasberry Pi Control</h2>
+                <div className="esp-node-header">
+                    <h2 className="esp-node-title">{nodeName}</h2>
+
+                    {onRemove && (
+                        <button
+                            className="remove-node-button"
+                            onClick={() => onRemove(node)}
+                            type="button"
+                        >
+                            Supprimer
+                        </button>
+                    )}
+                </div>
                 <hr />
 
                 {!rasberry ? (
