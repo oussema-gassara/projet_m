@@ -58,11 +58,11 @@ def get_forecast_data(node_name, limit=120):
     conn = mysql.connector.connect(**DB_CONFIG)
 
     query = """
-        SELECT created_at, cpu_temperature
+        SELECT created_at, cpu_temperature, external_temperature,
+               used_ram, total_ram
         FROM monitoring_data
         WHERE node_name = %s
           AND node_name LIKE 'esp32%'
-          AND cpu_temperature IS NOT NULL
         ORDER BY created_at DESC
         LIMIT %s
     """
@@ -74,73 +74,137 @@ def get_forecast_data(node_name, limit=120):
         return df
 
     df["created_at"] = pd.to_datetime(df["created_at"])
-    df["cpu_temperature"] = pd.to_numeric(df["cpu_temperature"], errors="coerce")
-    df = df.dropna(subset=["created_at", "cpu_temperature"])
+    for column in ["cpu_temperature", "external_temperature", "used_ram", "total_ram"]:
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+
+    # RAM prediction is based on percentage used, not raw KB.
+    df["ram_usage_percent"] = (
+        df["used_ram"] / df["total_ram"].replace(0, pd.NA)
+    ) * 100
+
     return df.sort_values("created_at").reset_index(drop=True)
 
 
-def forecast_cpu_temperature(node_name, horizon_minutes=5):
-    """Forecast future CPU temperature from real historical ESP32 data.
+def _forecast_series(df, value_column, horizon_minutes=5, minimum_rows=20):
+    """Forecast one real time-series value with Linear Regression."""
+    series = df[["created_at", value_column]].copy()
+    series[value_column] = pd.to_numeric(series[value_column], errors="coerce")
+    series = series.dropna()
 
-    A time-trend Linear Regression is intentionally used here instead of
-    Isolation Forest: this endpoint predicts future values rather than
-    detecting current anomalies.
-    """
-    df = get_forecast_data(node_name)
+    if len(series) < minimum_rows:
+        return None, len(series), "Pas encore assez de données historiques"
 
-    if len(df) < 20:
-        return {
-            "node_name": node_name,
-            "available": False,
-            "reason": "Pas encore assez de données historiques",
-            "rows_used": len(df),
-            "forecast": [],
-        }
-
-    # Use seconds from the first sample as the time variable.
     elapsed_seconds = (
-        df["created_at"] - df["created_at"].iloc[0]
+        series["created_at"] - series["created_at"].iloc[0]
     ).dt.total_seconds().to_numpy()
-    temperatures = df["cpu_temperature"].to_numpy()
+    values = series[value_column].to_numpy(dtype=float)
 
-    # If all timestamps are identical, a time forecast cannot be fitted.
     if elapsed_seconds[-1] <= elapsed_seconds[0]:
-        return {
-            "node_name": node_name,
-            "available": False,
-            "reason": "Les données historiques ne contiennent pas assez de variation temporelle",
-            "rows_used": len(df),
-            "forecast": [],
-        }
+        return None, len(series), "Les données historiques ne contiennent pas assez de variation temporelle"
 
     model = LinearRegression()
-    model.fit(elapsed_seconds.reshape(-1, 1), temperatures)
+    model.fit(elapsed_seconds.reshape(-1, 1), values)
 
+    future_minutes = [1, 2, 3, 4, 5][:horizon_minutes]
     last_time = elapsed_seconds[-1]
-    future_minutes = [1, 2, 3, 4, 5]
     future_seconds = last_time + (pd.Series(future_minutes).to_numpy() * 60)
     predicted = model.predict(future_seconds.reshape(-1, 1))
 
     forecast = [
         {
             "minutes_ahead": minute,
-            "predicted_cpu_temperature": round(float(temp), 2),
+            "value": round(float(value), 2),
         }
-        for minute, temp in zip(future_minutes, predicted)
+        for minute, value in zip(future_minutes, predicted)
     ]
 
-    current_temp = float(df["cpu_temperature"].iloc[-1])
-    final_prediction = float(predicted[-1])
+    current_value = float(series[value_column].iloc[-1])
+    trend_per_minute = float(model.coef_[0] * 60)
+
+    return {
+        "current": round(current_value, 2),
+        "predicted_5min": round(float(predicted[-1]), 2),
+        "trend_per_minute": round(trend_per_minute, 4),
+        "forecast": forecast,
+        "rows_used": len(series),
+    }, len(series), None
+
+
+def forecast_cpu_temperature(node_name, horizon_minutes=5):
+    """Backward-compatible CPU temperature forecast."""
+    df = get_forecast_data(node_name)
+    result, rows_used, reason = _forecast_series(
+        df, "cpu_temperature", horizon_minutes
+    )
+
+    if result is None:
+        return {
+            "node_name": node_name,
+            "available": False,
+            "reason": reason,
+            "rows_used": rows_used,
+            "forecast": [],
+        }
 
     return {
         "node_name": node_name,
         "available": True,
-        "rows_used": len(df),
-        "current_cpu_temperature": round(current_temp, 2),
-        "predicted_cpu_temperature_5min": round(final_prediction, 2),
-        "trend_per_minute": round(float(model.coef_[0] * 60), 4),
-        "forecast": forecast,
+        "rows_used": result["rows_used"],
+        "current_cpu_temperature": result["current"],
+        "predicted_cpu_temperature_5min": result["predicted_5min"],
+        "trend_per_minute": result["trend_per_minute"],
+        "forecast": result["forecast"],
         "model": "Linear Regression (time-series trend)",
+    }
+
+
+def forecast_node(node_name, horizon_minutes=5):
+    """Forecast CPU temperature, external temperature and RAM usage for one ESP32."""
+    df = get_forecast_data(node_name)
+
+    forecasts = {}
+    unavailable = []
+
+    definitions = [
+        ("cpu_temperature", "cpu_temperature", "°C"),
+        ("external_temperature", "external_temperature", "°C"),
+        ("ram_usage_percent", "ram_usage_percent", "%"),
+    ]
+
+    for key, column, unit in definitions:
+        result, rows_used, reason = _forecast_series(
+            df, column, horizon_minutes
+        )
+
+        if result is None:
+            forecasts[key] = {
+                "available": False,
+                "reason": reason,
+                "rows_used": rows_used,
+                "forecast": [],
+                "unit": unit,
+            }
+        else:
+            forecasts[key] = {
+                "available": True,
+                "current": result["current"],
+                "predicted_5min": result["predicted_5min"],
+                "trend_per_minute": result["trend_per_minute"],
+                "forecast": result["forecast"],
+                "rows_used": result["rows_used"],
+                "unit": unit,
+            }
+
+    available_count = sum(
+        1 for item in forecasts.values() if item["available"]
+    )
+
+    return {
+        "node_name": node_name,
+        "available": available_count > 0,
+        "forecasts": forecasts,
+        "model": "Linear Regression (time-series trend)",
+        "horizon_minutes": horizon_minutes,
     }
 
 
@@ -316,7 +380,7 @@ def detect():
 
 @app.route("/forecast", methods=["GET"])
 def forecast():
-    """Forecast CPU temperature for every real ESP32 node with enough history."""
+    """Forecast real future values for every ESP32 node."""
     conn = mysql.connector.connect(**DB_CONFIG)
     query = """
         SELECT DISTINCT node_name
@@ -329,12 +393,12 @@ def forecast():
     conn.close()
 
     forecasts = [
-        forecast_cpu_temperature(str(node_name))
+        forecast_node(str(node_name))
         for node_name in nodes_df["node_name"].dropna().tolist()
     ]
 
     return jsonify({
-        "forecast_type": "future_cpu_temperature",
+        "forecast_type": "future_esp32_metrics",
         "horizon_minutes": 5,
         "forecasts": forecasts,
     })
