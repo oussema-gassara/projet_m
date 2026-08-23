@@ -18,19 +18,8 @@ router.get("/test", (req, res) => {
 // toutes les 5 minutes pour éviter de remplir la base toutes
 // les 2 secondes pendant lesquelles l'ESP32 envoie ses mesures.
 function recordDanger(monitoringId, nodeName, dangerType, severity, sensorValue, thresholdValue, description, callback) {
-    const sql = `
-        SELECT id
-        FROM danger_history
-        WHERE danger_type = ?
-          AND severity = ?
-          AND JSON_EXTRACT(COALESCE(description, '{}'), '$.node_name') = ?
-          AND created_at >= NOW() - INTERVAL 5 MINUTE
-        ORDER BY id DESC
-        LIMIT 1
-    `;
-
-    // The existing description column is kept as human-readable text.
-    // Node filtering is therefore done with a simpler query below.
+    // The description column is human-readable text, so node filtering
+    // matches against the "[nodeName]" tag embedded in it below.
     const checkSql = `
         SELECT id
         FROM danger_history

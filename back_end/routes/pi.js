@@ -35,12 +35,13 @@ router.post("/pi/data", (req, res) => {
     disk_percent,
 
     uptime,
-    status
+    status,
+    node_name
 
     )
 
     VALUES
-    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 
     `;
 
@@ -65,6 +66,7 @@ router.post("/pi/data", (req, res) => {
 
         data.uptime,
         data.status,
+        data.node_name || "pi-1",
     ];
 
     db.query(sql, values, (err, result) => {
@@ -78,19 +80,15 @@ router.post("/pi/data", (req, res) => {
 });
 
 router.get("/pi", optionalAuth, (req, res) => {
-    const sql = `
+    const { node_name } = req.query;
 
-    SELECT *
+    const sql = node_name
+        ? `SELECT * FROM pi_data WHERE node_name = ? ORDER BY id DESC LIMIT 1`
+        : `SELECT * FROM pi_data ORDER BY id DESC LIMIT 1`;
 
-    FROM pi_data
+    const params = node_name ? [node_name] : [];
 
-    ORDER BY id DESC
-
-    LIMIT 1
-
-    `;
-
-    db.query(sql, (err, result) => {
+    db.query(sql, params, (err, result) => {
         if (err) {
             console.log(err);
             return res.status(500).json({ error: "Database error" });

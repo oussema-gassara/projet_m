@@ -113,7 +113,35 @@ CREATE TABLE system_events (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 
 );
-SELECT 
+CREATE TABLE pi_data (
+
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    hostname VARCHAR(50),
+    ip_address VARCHAR(20),
+    mac_address VARCHAR(25),
+    wifi_status VARCHAR(20),
+
+    cpu_temperature FLOAT,
+    cpu_usage_percent FLOAT,
+
+    total_ram INT,
+    free_ram INT,
+    used_ram INT,
+    used_ram_percent FLOAT,
+
+    disk_total INT,
+    disk_used INT,
+    disk_free INT,
+    disk_percent FLOAT,
+
+    uptime BIGINT,
+    status VARCHAR(20),
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+);
+SELECT
     wifi_signal,
     wifi_status,
     ip_address,
