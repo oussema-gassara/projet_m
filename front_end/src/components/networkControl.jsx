@@ -41,7 +41,7 @@ export default function NetworkControl({ nodeName = "esp32-1", testMode = false 
     if (denied) {
         return (
             <div className="network-control">
-                <h2>Network Control</h2>
+                <h2>Contrôle réseau</h2>
                 <hr />
                 <p>Accès réservé à l'administrateur.</p>
             </div>
@@ -49,21 +49,21 @@ export default function NetworkControl({ nodeName = "esp32-1", testMode = false 
     }
 
     if (!network) {
-        return <h2>Loading network data...</h2>;
+        return <h2>Chargement des données réseau...</h2>;
     }
 
     return (
         <div className="network-control">
-            <h2>Network Control {testMode && "(TEST)"}</h2>
+            <h2>Contrôle réseau {testMode && "(TEST)"}</h2>
             <hr />
 
-            <p>IP Address: {network.ip_address}</p>
+            <p>Adresse IP : {network.ip_address}</p>
             <hr />
-            <p>Wi-Fi Status: {network.wifi_status}</p>
+            <p>État du Wi-Fi : {network.wifi_status}</p>
             <hr />
 
             <p>
-                Signal Strength:{" "}
+                Puissance du signal :{" "}
                 <span className={clsx("metric-value", {
                     "metric-good": network.wifi_signal >= -60,
                     "metric-warning": network.wifi_signal < -60 && network.wifi_signal >= -80,
@@ -73,15 +73,15 @@ export default function NetworkControl({ nodeName = "esp32-1", testMode = false 
                 </span>
             </p>
             <hr />
-            <p>Gateway: {network.gateway}</p>
+            <p>Passerelle : {network.gateway}</p>
             <hr />
-            <p>Subnet: {network.subnet}</p>
+            <p>Sous-réseau : {network.subnet}</p>
             <hr />
-            <p>DNS: {network.dns}</p>
+            <p>DNS : {network.dns}</p>
             <hr />
-            <p>MAC Address: {network.mac_address}</p>
+            <p>Adresse MAC : {network.mac_address}</p>
             <hr />
-            <p>Hostname: {network.hostname}</p>
+            <p>Nom d'hôte : {network.hostname}</p>
         </div>
     );
 }
