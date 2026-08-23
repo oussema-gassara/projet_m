@@ -8,8 +8,8 @@ export default function Security() {
     useEffect(() => {
         const getSecurity = () => {
             fetch(`${API_URL}/api/security`)
-                .then((res) => res.json())
-                .then((data) => setSecurity(data))
+                .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Erreur serveur"))))
+                .then((data) => setSecurity(Array.isArray(data) ? data : []))
                 .catch((err) => console.error(err));
         };
         getSecurity();

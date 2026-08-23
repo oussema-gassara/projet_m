@@ -8,8 +8,8 @@ export default function DangerControl() {
     useEffect(() => {
         const getDangers = () => {
             fetch(`${API_URL}/api/dangers`)
-                .then((res) => res.json())
-                .then((data) => setDangers(data))
+                .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Erreur serveur"))))
+                .then((data) => setDangers(Array.isArray(data) ? data : []))
                 .catch((err) => console.error(err));
         };
 
