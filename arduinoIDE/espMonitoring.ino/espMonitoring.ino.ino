@@ -25,6 +25,8 @@ int lastHTTPResponse = 0;
 // Uncomment to enable hardware stress testing.
 // #define STRESS_TEST_ENABLED
 
+void startDiagnosticTask();
+
 void loadConfiguration();
 void saveConfiguration(const String &ssid, const String &password, const String &name);
 void clearConfiguration();
@@ -63,6 +65,11 @@ void setup()
     analogReadResolution(12);
 
     loadConfiguration();
+
+    // Start the local diagnostic service independently of Wi-Fi.
+    // It communicates through USB/UART and can therefore be used
+    // even when the ESP32 cannot connect to a Wi-Fi network.
+    startDiagnosticTask();
 
     WiFi.setHostname("ESP32-Monitor");
 
