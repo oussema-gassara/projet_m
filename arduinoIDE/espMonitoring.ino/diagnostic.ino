@@ -52,9 +52,9 @@ static void diagnosticTask(void *parameter)
 
 static void handleDiagnosticCommand(const String &command)
 {
-    // Prevent the normal monitoring loop from running reconnect/discovery/
-    // HTTP operations at the same time as a diagnostic command. This avoids
-    // interleaved Serial output that could corrupt the JSON response.
+    // Block the normal monitoring loop for the complete diagnostic command.
+    // This prevents discovery/reconnect/HTTP output from being interleaved
+    // with the JSON response expected by the local diagnostic program.
     diagnosticBusy = true;
 
     if (command == "PING")
@@ -71,8 +71,13 @@ static void handleDiagnosticCommand(const String &command)
         sendServerCheck();
     else if (command == "DIAG")
         sendHardwareDiagnostic();
+    else
+        Serial.println("{\"diagnostic\":\"ERROR\",\"status\":\"UNKNOWN_COMMAND\"}");
 
+    // Give the host enough time to receive the complete line before normal
+    // monitoring is allowed to resume.
     Serial.flush();
+    vTaskDelay(pdMS_TO_TICKS(100));
     diagnosticBusy = false;
 }
 
@@ -212,6 +217,9 @@ static void sendServerCheck()
 
     if (!serverFound || serverURL.length() == 0)
     {
+        // discoverServer() is allowed during a diagnostic command. The
+        // normal loop is already blocked by diagnosticBusy, so discovery
+        // cannot race with this command.
         bool found = discoverServer();
         if (!found || serverURL.length() == 0)
         {
