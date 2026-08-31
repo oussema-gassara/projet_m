@@ -9,6 +9,7 @@ extern String wifiPassword;
 extern String serverURL;
 extern bool setupMode;
 extern bool serverFound;
+extern volatile bool diagnosticBusy;
 extern bool discoverServer();
 extern bool connectToWiFi();
 
@@ -33,27 +34,46 @@ void startDiagnosticTask()
 static void diagnosticTask(void *parameter)
 {
     (void)parameter;
+
     for (;;)
     {
         if (Serial.available())
         {
             String command = Serial.readStringUntil('\n');
             command.trim();
-            if (command.length() > 0) handleDiagnosticCommand(command);
+
+            if (command.length() > 0)
+                handleDiagnosticCommand(command);
         }
+
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
 
 static void handleDiagnosticCommand(const String &command)
 {
-    if (command == "PING") Serial.println("{\"response\":\"PONG\"}");
-    else if (command == "IDENTIFY") sendIdentify();
-    else if (command == "WIFI_SCAN") sendWifiScan();
-    else if (command == "WIFI_CONNECT") sendWifiConnect();
-    else if (command == "WIFI_STATUS") sendWifiStatus();
-    else if (command == "SERVER_CHECK") sendServerCheck();
-    else if (command == "DIAG") sendHardwareDiagnostic();
+    // Prevent the normal monitoring loop from running reconnect/discovery/
+    // HTTP operations at the same time as a diagnostic command. This avoids
+    // interleaved Serial output that could corrupt the JSON response.
+    diagnosticBusy = true;
+
+    if (command == "PING")
+        Serial.println("{\"response\":\"PONG\"}");
+    else if (command == "IDENTIFY")
+        sendIdentify();
+    else if (command == "WIFI_SCAN")
+        sendWifiScan();
+    else if (command == "WIFI_CONNECT")
+        sendWifiConnect();
+    else if (command == "WIFI_STATUS")
+        sendWifiStatus();
+    else if (command == "SERVER_CHECK")
+        sendServerCheck();
+    else if (command == "DIAG")
+        sendHardwareDiagnostic();
+
+    Serial.flush();
+    diagnosticBusy = false;
 }
 
 static void sendIdentify()
@@ -80,8 +100,10 @@ static void sendWifiScan()
     json["status"] = "SCANNING";
     json["setup_mode_before_scan"] = setupMode;
 
-    if (setupMode) WiFi.mode(WIFI_AP_STA);
-    else WiFi.mode(WIFI_STA);
+    if (setupMode)
+        WiFi.mode(WIFI_AP_STA);
+    else
+        WiFi.mode(WIFI_STA);
 
     delay(100);
 
