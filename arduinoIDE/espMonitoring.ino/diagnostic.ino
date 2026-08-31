@@ -4,15 +4,19 @@
 #include <esp_system.h>
 
 extern String nodeName;
+extern String wifiSSID;
+extern String wifiPassword;
 extern String serverURL;
 extern bool setupMode;
 extern bool serverFound;
 extern bool discoverServer();
+extern bool connectToWiFi();
 
 static void diagnosticTask(void *parameter);
 static void handleDiagnosticCommand(const String &command);
 static void sendIdentify();
 static void sendWifiScan();
+static void sendWifiConnect();
 static void sendWifiStatus();
 static void sendServerCheck();
 static void sendHardwareDiagnostic();
@@ -46,6 +50,7 @@ static void handleDiagnosticCommand(const String &command)
     if (command == "PING") Serial.println("{\"response\":\"PONG\"}");
     else if (command == "IDENTIFY") sendIdentify();
     else if (command == "WIFI_SCAN") sendWifiScan();
+    else if (command == "WIFI_CONNECT") sendWifiConnect();
     else if (command == "WIFI_STATUS") sendWifiStatus();
     else if (command == "SERVER_CHECK") sendServerCheck();
     else if (command == "DIAG") sendHardwareDiagnostic();
@@ -108,6 +113,38 @@ static void sendWifiScan()
     WiFi.scanDelete();
 }
 
+static void sendWifiConnect()
+{
+    StaticJsonDocument<1024> json;
+    json["diagnostic"] = "WIFI_CONNECT";
+    json["ssid"] = wifiSSID;
+
+    if (wifiSSID.length() == 0)
+    {
+        json["connected"] = false;
+        json["status"] = "NO_SSID_CONFIGURED";
+    }
+    else if (connectToWiFi())
+    {
+        json["connected"] = true;
+        json["status"] = "CONNECTED";
+        json["rssi"] = WiFi.RSSI();
+        json["ip"] = WiFi.localIP().toString();
+        json["gateway"] = WiFi.gatewayIP().toString();
+        json["mac"] = WiFi.macAddress();
+    }
+    else
+    {
+        json["connected"] = false;
+        json["status"] = "CONNECTION_FAILED";
+        json["wifi_status_code"] = (int)WiFi.status();
+    }
+
+    String output;
+    serializeJson(json, output);
+    Serial.println(output);
+}
+
 static void sendWifiStatus()
 {
     StaticJsonDocument<1024> json;
@@ -151,8 +188,6 @@ static void sendServerCheck()
     json["wifi_connected"] = true;
     json["esp32_ip"] = WiFi.localIP().toString();
 
-    // Reuse the server already discovered by the normal firmware.
-    // If none is available, perform the existing local-network discovery.
     if (!serverFound || serverURL.length() == 0)
     {
         bool found = discoverServer();
