@@ -14,12 +14,7 @@ DEFAULT_TIMEOUT = 5
 
 
 def query(ser, command, timeout=DEFAULT_TIMEOUT, expected=None):
-    """Send a diagnostic command and return its JSON response.
-
-    ESP32 may print normal monitoring/discovery messages before, during, or
-    after the JSON response. Only a JSON object with the expected diagnostic
-    name is accepted as the command result; all other serial lines are ignored.
-    """
+    """Send a command and return only its matching JSON response."""
     ser.reset_input_buffer()
     ser.write((command + "\n").encode())
     ser.flush()
@@ -38,10 +33,8 @@ def query(ser, command, timeout=DEFAULT_TIMEOUT, expected=None):
 
         lines.append(line)
 
-        # Ignore normal ESP32 text such as:
-        #   Checking 192.168.100.20...
-        #   WiFi Connected!
-        # and keep looking for the actual JSON response.
+        # Normal firmware output (Checking..., WiFi Connected!, etc.) is not
+        # a diagnostic response. Keep reading until the expected JSON arrives.
         if not (line.startswith("{") and line.endswith("}")):
             continue
 
@@ -60,13 +53,205 @@ def ports():
     return [p.device for p in list_ports.comports()]
 
 
+def valid(result):
+    return isinstance(result, dict) and "raw" not in result
+
+
 def print_result(label, result):
-    if "raw" in result:
+    if not valid(result):
         print(f"{label}: no valid JSON response")
-        for line in result["raw"][-5:]:
+        for line in result.get("raw", [])[-5:]:
             print("  ", line)
     else:
         print(f"{label}:", json.dumps(result, indent=2))
+
+
+def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server, diag):
+    node = identify.get("node_name", "unknown") if valid(identify) else "unknown"
+    mac = identify.get("mac", "unknown") if valid(identify) else "unknown"
+
+    networks = wifi_scan.get("networks", []) if valid(wifi_scan) else []
+    network_names = [n.get("ssid", "") for n in networks]
+    networks_found = wifi_scan.get("networks_found", 0) if valid(wifi_scan) else None
+    wifi_hardware = wifi_scan.get("wifi_hardware", "UNKNOWN") if valid(wifi_scan) else "UNKNOWN"
+
+    configured_ssid = wifi_connect.get("ssid", "") if valid(wifi_connect) else ""
+    ssid_detected = configured_ssid in network_names if configured_ssid else None
+
+    connect_ok = bool(wifi_connect.get("connected")) if valid(wifi_connect) else False
+    status_ok = bool(wifi_status.get("connected")) if valid(wifi_status) else False
+    connected = connect_ok or status_ok
+
+    result = {
+        "port": port,
+        "node_name": node,
+        "mac": mac,
+        "wifi_hardware": wifi_hardware,
+        "networks_found": networks_found,
+        "configured_ssid": configured_ssid or None,
+        "ssid_detected": ssid_detected,
+        "wifi_connected": connected,
+        "wifi_ip": wifi_status.get("ip") if valid(wifi_status) else None,
+        "wifi_rssi": wifi_status.get("rssi") if valid(wifi_status) else None,
+        "server_reachable": server.get("server_reachable") if valid(server) else None,
+        "server_url": server.get("server_url") if valid(server) else None,
+        "server_http_code": server.get("http_code") if valid(server) else None,
+    }
+
+    # Hardware diagnostic has highest priority after UART/IDENTIFY succeeded.
+    if valid(diag):
+        suspect_parts = [
+            part
+            for part in ("cpu", "ram", "flash")
+            if diag.get(part) not in (None, "OK")
+        ]
+        if suspect_parts:
+            result.update(
+                code="HARDWARE_SUSPECT",
+                severity="ERROR",
+                message="Hardware diagnostic reported a suspect component: "
+                + ", ".join(suspect_parts),
+            )
+            return result
+
+    if not valid(wifi_scan):
+        result.update(
+            code="WIFI_SCAN_NO_RESPONSE",
+            severity="ERROR",
+            message="The ESP32 answered on UART, but the Wi-Fi scan did not return a valid response.",
+        )
+        return result
+
+    if wifi_hardware != "OK":
+        result.update(
+            code="WIFI_HARDWARE_SUSPECT",
+            severity="ERROR",
+            message="The ESP32 Wi-Fi scan itself failed. The Wi-Fi subsystem should be checked.",
+        )
+        return result
+
+    # If connection succeeded, it is authoritative even if a hidden SSID was
+    # absent from the visible scan list.
+    if connected:
+        if not valid(server):
+            result.update(
+                code="SERVER_CHECK_NO_RESPONSE",
+                severity="WARNING",
+                message="Wi-Fi is connected, but the server diagnostic did not return a valid response.",
+            )
+            return result
+
+        if server.get("server_reachable") is True:
+            result.update(
+                code="ESP32_OK",
+                severity="OK",
+                message="ESP32 hardware, Wi-Fi connection and Node.js server communication are operational.",
+            )
+            return result
+
+        server_status = server.get("status", "SERVER_NOT_REACHABLE")
+        if server_status == "SERVER_NOT_FOUND":
+            code = "SERVER_NOT_FOUND"
+            message = "Wi-Fi is working, but the Node.js server was not discovered on the local network."
+        elif server_status == "SERVER_HTTP_ERROR":
+            code = "SERVER_HTTP_ERROR"
+            message = "The server answered, but the diagnostic endpoint returned an HTTP error."
+        else:
+            code = "SERVER_NOT_REACHABLE"
+            message = "Wi-Fi is working, but the Node.js server cannot be reached."
+
+        result.update(code=code, severity="WARNING", message=message)
+        return result
+
+    # From here the ESP32 is not connected to its configured Wi-Fi.
+    if valid(wifi_connect) and wifi_connect.get("status") == "NO_SSID_CONFIGURED":
+        result.update(
+            code="NO_SSID_CONFIGURED",
+            severity="WARNING",
+            message="No Wi-Fi SSID is saved on the ESP32.",
+        )
+        return result
+
+    if networks_found == 0:
+        result.update(
+            code="NO_WIFI_NETWORKS",
+            severity="WARNING",
+            message="The Wi-Fi hardware responded, but no nearby Wi-Fi network was detected.",
+        )
+        return result
+
+    if configured_ssid and ssid_detected is False:
+        result.update(
+            code="SSID_NOT_FOUND",
+            severity="WARNING",
+            message=f"The configured SSID '{configured_ssid}' was not found in the Wi-Fi scan.",
+        )
+        return result
+
+    if not valid(wifi_connect):
+        result.update(
+            code="WIFI_CONNECT_NO_RESPONSE",
+            severity="ERROR",
+            message="Wi-Fi networks were detected, but WIFI_CONNECT returned no valid diagnostic response.",
+        )
+        return result
+
+    # The ESP32 Arduino status alone cannot prove that the password is wrong.
+    # If the SSID is visible but connection fails, credentials/configuration are
+    # the most useful diagnosis without making a false certainty claim.
+    if wifi_connect.get("status") == "CONNECTION_FAILED":
+        result.update(
+            code="WIFI_CREDENTIALS_OR_CONFIG_ERROR",
+            severity="WARNING",
+            message="The configured SSID is visible, but connection failed. Check password, security mode and Wi-Fi configuration.",
+        )
+        return result
+
+    result.update(
+        code="WIFI_NOT_CONNECTED",
+        severity="WARNING",
+        message="The ESP32 Wi-Fi subsystem responds, but the board is not connected to Wi-Fi.",
+    )
+    return result
+
+
+def print_final(result):
+    print()
+    print("========================================")
+    print("          FINAL DIAGNOSTIC")
+    print("========================================")
+    print("COM              :", result.get("port"))
+    print("Node             :", result.get("node_name"))
+    print("MAC              :", result.get("mac"))
+    print("Wi-Fi hardware   :", result.get("wifi_hardware"))
+    print("Networks found   :", result.get("networks_found"))
+    print("Configured SSID  :", result.get("configured_ssid") or "<none>")
+
+    ssid_detected = result.get("ssid_detected")
+    if ssid_detected is None:
+        detected_text = "UNKNOWN"
+    else:
+        detected_text = "YES" if ssid_detected else "NO"
+    print("SSID detected    :", detected_text)
+
+    print("Wi-Fi connected  :", "YES" if result.get("wifi_connected") else "NO")
+    print("IP               :", result.get("wifi_ip") or "-")
+    print("RSSI             :", result.get("wifi_rssi") if result.get("wifi_rssi") is not None else "-")
+
+    server_value = result.get("server_reachable")
+    if server_value is None:
+        server_text = "UNKNOWN"
+    else:
+        server_text = "YES" if server_value else "NO"
+    print("Server reachable :", server_text)
+    print("Server HTTP      :", result.get("server_http_code") if result.get("server_http_code") is not None else "-")
+    print("----------------------------------------")
+    print("RESULT           :", result.get("code"))
+    print("MESSAGE          :", result.get("message"))
+    print("========================================")
+
+    # One-line machine-readable result for the future Node.js/React integration.
+    print("FINAL_RESULT_JSON=" + json.dumps(result, ensure_ascii=False))
 
 
 def main():
@@ -99,27 +284,23 @@ def main():
             ser.reset_input_buffer()
 
             identify = query(ser, "IDENTIFY", timeout=8, expected="IDENTIFY")
-            if "raw" in identify:
+            if not valid(identify):
                 print("No valid IDENTIFY response.")
                 print("This port may not be an ESP32 diagnostic port.")
                 print()
                 continue
 
-            node = identify.get("node_name", "unknown")
-            mac = identify.get("mac", "unknown")
-            print("Node:", node)
-            print("MAC :", mac)
+            print("Node:", identify.get("node_name", "unknown"))
+            print("MAC :", identify.get("mac", "unknown"))
 
             wifi_scan = query(ser, "WIFI_SCAN", timeout=30, expected="WIFI_SCAN")
             print_result("Wi-Fi scan", wifi_scan)
 
-            if "raw" not in wifi_scan:
-                found = wifi_scan.get("networks_found", 0)
-                hardware = wifi_scan.get("wifi_hardware", "UNKNOWN")
+            if valid(wifi_scan):
                 print()
                 print("Wi-Fi Summary:")
-                print("  Wi-Fi hardware :", hardware)
-                print("  Networks found :", found)
+                print("  Wi-Fi hardware :", wifi_scan.get("wifi_hardware", "UNKNOWN"))
+                print("  Networks found :", wifi_scan.get("networks_found", 0))
 
                 for network in wifi_scan.get("networks", []):
                     print(
@@ -128,9 +309,6 @@ def main():
                         f"channel {network.get('channel', '?')})"
                     )
 
-            # WIFI_CONNECT can take as long as the firmware's connection
-            # timeout. The normal ESP32 text printed by connectToWiFi() is
-            # ignored until the WIFI_CONNECT JSON object arrives.
             wifi_connect = query(
                 ser, "WIFI_CONNECT", timeout=45, expected="WIFI_CONNECT"
             )
@@ -139,14 +317,22 @@ def main():
             wifi_status = query(ser, "WIFI_STATUS", timeout=8, expected="WIFI_STATUS")
             print_result("Wi-Fi status", wifi_status)
 
-            # SERVER_CHECK may perform a local-network discovery. Give it
-            # enough time to finish instead of treating discovery log lines
-            # as a failed JSON response.
             server = query(ser, "SERVER_CHECK", timeout=120, expected="SERVER_CHECK")
             print_result("Server check", server)
 
             diag = query(ser, "DIAG", timeout=10, expected="DIAG")
             print_result("Diagnostic", diag)
+
+            final_result = make_diagnosis(
+                port,
+                identify,
+                wifi_scan,
+                wifi_connect,
+                wifi_status,
+                server,
+                diag,
+            )
+            print_final(final_result)
             print()
 
         except (serial.SerialException, OSError) as exc:
