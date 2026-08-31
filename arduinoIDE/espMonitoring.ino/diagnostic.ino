@@ -1,15 +1,20 @@
 #include <WiFi.h>
+#include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <esp_system.h>
 
 extern String nodeName;
+extern String serverURL;
 extern bool setupMode;
+extern bool serverFound;
+extern bool discoverServer();
 
 static void diagnosticTask(void *parameter);
 static void handleDiagnosticCommand(const String &command);
 static void sendIdentify();
 static void sendWifiScan();
 static void sendWifiStatus();
+static void sendServerCheck();
 static void sendHardwareDiagnostic();
 
 void startDiagnosticTask()
@@ -42,6 +47,7 @@ static void handleDiagnosticCommand(const String &command)
     else if (command == "IDENTIFY") sendIdentify();
     else if (command == "WIFI_SCAN") sendWifiScan();
     else if (command == "WIFI_STATUS") sendWifiStatus();
+    else if (command == "SERVER_CHECK") sendServerCheck();
     else if (command == "DIAG") sendHardwareDiagnostic();
 }
 
@@ -69,14 +75,11 @@ static void sendWifiScan()
     json["status"] = "SCANNING";
     json["setup_mode_before_scan"] = setupMode;
 
-    // Keep the current Wi-Fi connection alive while scanning.
-    // Disconnecting here can race with the main firmware Wi-Fi logic.
     if (setupMode) WiFi.mode(WIFI_AP_STA);
     else WiFi.mode(WIFI_STA);
 
     delay(100);
 
-    // Blocking scan: wait for the scan to finish before answering UART.
     int count = WiFi.scanNetworks(false, true);
 
     if (count < 0)
@@ -121,6 +124,73 @@ static void sendWifiStatus()
         json["ip"] = WiFi.localIP().toString();
         json["gateway"] = WiFi.gatewayIP().toString();
         json["mac"] = WiFi.macAddress();
+    }
+
+    String output;
+    serializeJson(json, output);
+    Serial.println(output);
+}
+
+static void sendServerCheck()
+{
+    StaticJsonDocument<1024> json;
+    json["diagnostic"] = "SERVER_CHECK";
+
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        json["wifi_connected"] = false;
+        json["server_reachable"] = false;
+        json["status"] = "WIFI_NOT_CONNECTED";
+
+        String output;
+        serializeJson(json, output);
+        Serial.println(output);
+        return;
+    }
+
+    json["wifi_connected"] = true;
+    json["esp32_ip"] = WiFi.localIP().toString();
+
+    // Reuse the server already discovered by the normal firmware.
+    // If none is available, perform the existing local-network discovery.
+    if (!serverFound || serverURL.length() == 0)
+    {
+        bool found = discoverServer();
+        if (!found || serverURL.length() == 0)
+        {
+            json["server_reachable"] = false;
+            json["status"] = "SERVER_NOT_FOUND";
+
+            String output;
+            serializeJson(json, output);
+            Serial.println(output);
+            return;
+        }
+    }
+
+    json["server_url"] = serverURL;
+
+    HTTPClient http;
+    http.setConnectTimeout(2000);
+    http.setTimeout(3000);
+
+    if (!http.begin(serverURL))
+    {
+        json["server_reachable"] = false;
+        json["status"] = "HTTP_INIT_FAILED";
+    }
+    else
+    {
+        int code = http.GET();
+        json["http_code"] = code;
+        json["server_reachable"] = code > 0;
+
+        if (code > 0)
+            json["status"] = (code >= 200 && code < 500) ? "SERVER_REACHABLE" : "SERVER_ERROR";
+        else
+            json["status"] = "SERVER_NOT_REACHABLE";
+
+        http.end();
     }
 
     String output;
