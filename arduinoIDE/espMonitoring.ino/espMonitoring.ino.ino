@@ -276,7 +276,7 @@ void handleConfigNotFound()
 
 bool discoverServer()
 {
-    if (WiFi.status() != WL_CONNECTED || diagnosticBusy)
+    if (WiFi.status() != WL_CONNECTED)
         return false;
 
     Serial.println();
@@ -294,8 +294,6 @@ bool discoverServer()
 
     for (int host = SERVER_SCAN_START; host <= SERVER_SCAN_END; host++)
     {
-        if (diagnosticBusy) return false;
-
         IPAddress targetIP(network[0], network[1], network[2], host);
         if (targetIP == localIP) continue;
 
@@ -305,7 +303,6 @@ bool discoverServer()
 
         if (testServer(targetIP.toString()))
         {
-            if (diagnosticBusy) return false;
             serverURL = "http://" + targetIP.toString() + ":" + String(SERVER_PORT) + String(API_PATH);
             serverFound = true;
             Serial.println();
@@ -326,8 +323,6 @@ bool discoverServer()
 
 bool testServer(const String &ip)
 {
-    if (diagnosticBusy) return false;
-
     WiFiClient client;
     client.setTimeout(SERVER_SCAN_TIMEOUT);
     if (!client.connect(ip.c_str(), SERVER_PORT)) return false;
@@ -337,11 +332,6 @@ bool testServer(const String &ip)
     unsigned long start = millis();
     while (!client.available() && millis() - start < SERVER_SCAN_TIMEOUT)
     {
-        if (diagnosticBusy)
-        {
-            client.stop();
-            return false;
-        }
         delay(5);
     }
 
