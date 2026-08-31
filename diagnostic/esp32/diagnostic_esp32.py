@@ -12,7 +12,8 @@ except ImportError:
 BAUDRATE = 115200
 TIMEOUT = 3
 
-def query(ser, command, timeout=TIMEOUT):
+
+def query(ser, command, timeout=TIMEOUT, expected=None):
     ser.reset_input_buffer()
     ser.write((command + "\n").encode())
     ser.flush()
@@ -23,17 +24,20 @@ def query(ser, command, timeout=TIMEOUT):
         raw = ser.readline()
         if not raw:
             continue
+
         line = raw.decode(errors="ignore").strip()
         if not line:
             continue
+
         lines.append(line)
 
-        # The firmware can print normal startup/debug text before JSON.
         if line.startswith("{") and line.endswith("}"):
             try:
-                return json.loads(line)
+                data = json.loads(line)
+                if expected is None or data.get("diagnostic") == expected:
+                    return data
             except json.JSONDecodeError:
-                continue
+                pass
 
     return {"raw": lines}
 
@@ -61,7 +65,16 @@ def main():
         print("No COM port detected.")
         return
 
-    print("Detected ports:", ", ".join(detected))
+    # Optional COM port: diagnostic_esp32.bat can pass COM3.
+    requested = sys.argv[1].upper() if len(sys.argv) > 1 else None
+    if requested:
+        detected = [p for p in detected if p.upper() == requested]
+        if not detected:
+            print(f"Port {requested} was not detected.")
+            return
+    else:
+        print("Detected ports:", ", ".join(detected))
+
     print()
 
     for port in detected:
@@ -69,28 +82,46 @@ def main():
         ser = None
         try:
             ser = serial.Serial(port, BAUDRATE, timeout=0.2)
-            # Opening a USB serial port can reset many ESP32 boards.
+            # Opening the port may reset an ESP32. Give it time to boot.
             time.sleep(2)
             ser.reset_input_buffer()
 
-            identify = query(ser, "IDENTIFY", timeout=4)
+            identify = query(ser, "IDENTIFY", timeout=5)
             if "raw" in identify:
                 print("No valid IDENTIFY response.")
                 print("This port may not be an ESP32 diagnostic port.")
                 print()
                 continue
 
-            print("Node:", identify.get("node_name", "unknown"))
-            print("MAC :", identify.get("mac", "unknown"))
+            node = identify.get("node_name", "unknown")
+            mac = identify.get("mac", "unknown")
+            print("Node:", node)
+            print("MAC :", mac)
 
-            diag = query(ser, "DIAG", timeout=4)
+            diag = query(ser, "DIAG", timeout=5, expected="DIAG")
             print_result("Diagnostic", diag)
 
-            # WIFI_SCAN can take several seconds. Keep the same serial
-            # connection open so opening the port does not reset the ESP32
-            # between IDENTIFY, DIAG and WIFI_SCAN.
-            wifi = query(ser, "WIFI_SCAN", timeout=15)
+            # Keep the same COM session. WIFI_SCAN may temporarily affect the
+            # normal Wi-Fi connection, so allow enough time for completion.
+            wifi = query(ser, "WIFI_SCAN", timeout=20, expected="WIFI_SCAN")
             print_result("Wi-Fi scan", wifi)
+
+            if "raw" not in wifi:
+                found = wifi.get("networks_found", 0)
+                hardware = wifi.get("wifi_hardware", "UNKNOWN")
+                print()
+                print("Summary:")
+                print("  Wi-Fi hardware :", hardware)
+                print("  Networks found :", found)
+
+                networks = wifi.get("networks", [])
+                for network in networks:
+                    print(
+                        f"  - {network.get('ssid', '<hidden>')} "
+                        f"(RSSI {network.get('rssi', '?')} dBm, "
+                        f"channel {network.get('channel', '?')})"
+                    )
+
             print()
 
         except (serial.SerialException, OSError) as exc:
