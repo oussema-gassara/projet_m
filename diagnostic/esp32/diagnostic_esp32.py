@@ -65,7 +65,6 @@ def main():
         print("No COM port detected.")
         return
 
-    # Optional COM port: diagnostic_esp32.bat can pass COM3.
     requested = sys.argv[1].upper() if len(sys.argv) > 1 else None
     if requested:
         detected = [p for p in detected if p.upper() == requested]
@@ -82,10 +81,10 @@ def main():
         ser = None
         try:
             ser = serial.Serial(port, BAUDRATE, timeout=0.2)
-            # Opening the port may reset an ESP32. Give it time to boot.
             time.sleep(2)
             ser.reset_input_buffer()
 
+            # First identify the board.
             identify = query(ser, "IDENTIFY", timeout=5)
             if "raw" in identify:
                 print("No valid IDENTIFY response.")
@@ -98,11 +97,9 @@ def main():
             print("Node:", node)
             print("MAC :", mac)
 
-            diag = query(ser, "DIAG", timeout=5, expected="DIAG")
-            print_result("Diagnostic", diag)
-
-            # Keep the same COM session. WIFI_SCAN may temporarily affect the
-            # normal Wi-Fi connection, so allow enough time for completion.
+            # IMPORTANT: scan before DIAG. We verified manually that WIFI_SCAN
+            # works in this state, while DIAG followed by WIFI_SCAN can leave
+            # the Wi-Fi scan with zero networks.
             wifi = query(ser, "WIFI_SCAN", timeout=20, expected="WIFI_SCAN")
             print_result("Wi-Fi scan", wifi)
 
@@ -110,7 +107,7 @@ def main():
                 found = wifi.get("networks_found", 0)
                 hardware = wifi.get("wifi_hardware", "UNKNOWN")
                 print()
-                print("Summary:")
+                print("Wi-Fi Summary:")
                 print("  Wi-Fi hardware :", hardware)
                 print("  Networks found :", found)
 
@@ -122,6 +119,9 @@ def main():
                         f"channel {network.get('channel', '?')})"
                     )
 
+            # Run the hardware/system diagnostic AFTER the Wi-Fi scan.
+            diag = query(ser, "DIAG", timeout=5, expected="DIAG")
+            print_result("Diagnostic", diag)
             print()
 
         except (serial.SerialException, OSError) as exc:
