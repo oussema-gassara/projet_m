@@ -17,36 +17,25 @@ String serverURL = "";
 
 bool setupMode = false;
 bool serverFound = false;
+volatile bool diagnosticBusy = false;
 
 unsigned long lastSend = 0;
 unsigned long reconnectCount = 0;
 int lastHTTPResponse = 0;
 
-// Uncomment to enable hardware stress testing.
-// #define STRESS_TEST_ENABLED
-
 void startDiagnosticTask();
-
 void loadConfiguration();
 void saveConfiguration(const String &ssid, const String &password, const String &name);
 void clearConfiguration();
-
 bool connectToWiFi();
 void startConfigurationMode();
 void handleConfigPage();
 void handleSaveConfiguration();
 void handleConfigNotFound();
 void reconnectWiFi();
-
 bool discoverServer();
 bool testServer(const String &ip);
-
 void sendData();
-
-#ifdef STRESS_TEST_ENABLED
-void stressCPU(unsigned long durationMs);
-void stressRAM();
-#endif
 
 void setup()
 {
@@ -65,10 +54,6 @@ void setup()
     analogReadResolution(12);
 
     loadConfiguration();
-
-    // Start the local diagnostic service independently of Wi-Fi.
-    // It communicates through USB/UART and can therefore be used
-    // even when the ESP32 cannot connect to a Wi-Fi network.
     startDiagnosticTask();
 
     WiFi.setHostname("ESP32-Monitor");
@@ -101,24 +86,17 @@ void setup()
         Serial.println("Could not connect to saved WiFi.");
         startConfigurationMode();
     }
-
-#ifdef STRESS_TEST_ENABLED
-    Serial.println("!!! STRESS TEST MODE ENABLED !!!");
-#endif
 }
 
 void loadConfiguration()
 {
     preferences.begin("wifi", true);
-
     wifiSSID = preferences.getString("ssid", "");
     wifiPassword = preferences.getString("password", "");
     nodeName = preferences.getString("node", DEFAULT_NODE_NAME);
-
     preferences.end();
 
-    if (nodeName.length() == 0)
-        nodeName = DEFAULT_NODE_NAME;
+    if (nodeName.length() == 0) nodeName = DEFAULT_NODE_NAME;
 
     Serial.println();
     Serial.println("==========================================");
@@ -133,11 +111,9 @@ void loadConfiguration()
 void saveConfiguration(const String &ssid, const String &password, const String &name)
 {
     preferences.begin("wifi", false);
-
     preferences.putString("ssid", ssid);
     preferences.putString("password", password);
     preferences.putString("node", name);
-
     preferences.end();
 
     wifiSSID = ssid;
@@ -154,7 +130,6 @@ void clearConfiguration()
     preferences.begin("wifi", false);
     preferences.clear();
     preferences.end();
-
     wifiSSID = "";
     wifiPassword = "";
     nodeName = DEFAULT_NODE_NAME;
@@ -172,16 +147,13 @@ bool connectToWiFi()
     WiFi.mode(WIFI_STA);
     WiFi.disconnect(true);
     delay(500);
-
     WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
 
     unsigned long startTime = millis();
-
     while (WiFi.status() != WL_CONNECTED)
     {
         delay(500);
         Serial.print(".");
-
         if (millis() - startTime >= WIFI_CONNECT_TIMEOUT)
         {
             Serial.println();
@@ -201,7 +173,6 @@ bool connectToWiFi()
     Serial.print("MAC        : "); Serial.println(WiFi.macAddress());
     Serial.print("RSSI       : "); Serial.print(WiFi.RSSI()); Serial.println(" dBm");
     Serial.println("==========================================");
-
     return true;
 }
 
@@ -235,65 +206,28 @@ void startConfigurationMode()
     configServer.on("/save", HTTP_POST, handleSaveConfiguration);
     configServer.onNotFound(handleConfigNotFound);
     configServer.begin();
-
     Serial.println("Configuration server started.");
 }
 
 void handleConfigPage()
 {
     String html = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ESP32 Setup</title>
-<style>
-body{font-family:Arial;background:#f2f2f2;margin:0;padding:30px}
-.container{max-width:450px;margin:auto;background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,.15)}
-h1{text-align:center}label{display:block;margin-top:15px;font-weight:bold}
-input{width:100%;padding:12px;margin-top:7px;box-sizing:border-box;border:1px solid #ccc;border-radius:6px}
-button{width:100%;padding:13px;margin-top:25px;background:#007bff;color:white;border:0;border-radius:6px;font-size:16px;cursor:pointer}
-.info{margin-top:15px;font-size:14px;color:#555}
-</style>
-</head>
-<body>
-<div class="container">
-<h1>ESP32 Setup</h1>
-<p>Configure WiFi and identify this ESP32 node.</p>
-<form action="/save" method="POST">
-<label>WiFi SSID</label>
-<input type="text" name="ssid" value=")rawliteral";
-
+<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>ESP32 Setup</title>
+<style>body{font-family:Arial;background:#f2f2f2;margin:0;padding:30px}.container{max-width:450px;margin:auto;background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,.15)}h1{text-align:center}label{display:block;margin-top:15px;font-weight:bold}input{width:100%;padding:12px;margin-top:7px;box-sizing:border-box;border:1px solid #ccc;border-radius:6px}button{width:100%;padding:13px;margin-top:25px;background:#007bff;color:white;border:0;border-radius:6px;font-size:16px;cursor:pointer}.info{margin-top:15px;font-size:14px;color:#555}</style></head>
+<body><div class="container"><h1>ESP32 Setup</h1><p>Configure WiFi and identify this ESP32 node.</p><form action="/save" method="POST">
+<label>WiFi SSID</label><input type="text" name="ssid" value=")rawliteral";
     html += wifiSSID;
-
-    html += R"rawliteral(" required>
-<label>WiFi Password</label>
-<input type="password" name="password" placeholder="Enter WiFi password" required>
-<label>Node Name</label>
-<input type="text" name="node_name" value=")rawliteral";
-
+    html += R"rawliteral(" required><label>WiFi Password</label><input type="password" name="password" placeholder="Enter WiFi password" required>
+<label>Node Name</label><input type="text" name="node_name" value=")rawliteral";
     html += nodeName;
-
-    html += R"rawliteral(" placeholder="esp32-1" required>
-<button type="submit">Save & Connect</button>
-</form>
-<div class="info">
-Choose a unique name such as <b>esp32-1</b>, <b>esp32-2</b> or <b>esp32-3</b>.
-The same firmware can be used on all boards.
-</div>
-</div>
-</body>
-</html>
-)rawliteral";
-
+    html += R"rawliteral(" placeholder="esp32-1" required><button type="submit">Save & Connect</button></form>
+<div class="info">Choose a unique name such as <b>esp32-1</b>, <b>esp32-2</b> or <b>esp32-3</b>.<br>The same firmware can be used on all boards.</div></div></body></html>)rawliteral";
     configServer.send(200, "text/html", html);
 }
 
 void handleSaveConfiguration()
 {
-    if (!configServer.hasArg("ssid") ||
-        !configServer.hasArg("password") ||
-        !configServer.hasArg("node_name"))
+    if (!configServer.hasArg("ssid") || !configServer.hasArg("password") || !configServer.hasArg("node_name"))
     {
         configServer.send(400, "text/plain", "Missing SSID, password or node name.");
         return;
@@ -302,7 +236,6 @@ void handleSaveConfiguration()
     String newSSID = configServer.arg("ssid");
     String newPassword = configServer.arg("password");
     String newNodeName = configServer.arg("node_name");
-
     newSSID.trim();
     newNodeName.trim();
 
@@ -312,24 +245,8 @@ void handleSaveConfiguration()
         return;
     }
 
-    Serial.println();
-    Serial.println("==========================================");
-    Serial.println("        NEW ESP32 CONFIGURATION");
-    Serial.println("==========================================");
-    Serial.print("SSID      : "); Serial.println(newSSID);
-    Serial.print("Node Name : "); Serial.println(newNodeName);
-
     saveConfiguration(newSSID, newPassword, newNodeName);
-
-    configServer.send(200, "text/html", R"rawliteral(
-<!DOCTYPE html>
-<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>ESP32</title></head>
-<body style="font-family:Arial;text-align:center;padding:40px">
-<h1>Configuration saved!</h1>
-<p>The ESP32 is connecting to the WiFi.</p>
-<p>You can close this page.</p>
-</body></html>
-)rawliteral");
+    configServer.send(200, "text/html", "<html><body style='font-family:Arial;text-align:center;padding:40px'><h1>Configuration saved!</h1><p>The ESP32 is connecting to the WiFi.</p><p>You can close this page.</p></body></html>");
 
     delay(1500);
     configServer.stop();
@@ -343,10 +260,7 @@ void handleSaveConfiguration()
             Serial.print("Server URL: ");
             Serial.println(serverURL);
         }
-        else
-        {
-            Serial.println("Node.js server not found.");
-        }
+        else Serial.println("Node.js server not found.");
     }
     else
     {
@@ -362,7 +276,7 @@ void handleConfigNotFound()
 
 bool discoverServer()
 {
-    if (WiFi.status() != WL_CONNECTED)
+    if (WiFi.status() != WL_CONNECTED || diagnosticBusy)
         return false;
 
     Serial.println();
@@ -376,16 +290,14 @@ bool discoverServer()
     IPAddress localIP = WiFi.localIP();
     IPAddress subnet = WiFi.subnetMask();
     IPAddress network;
-
-    for (int i = 0; i < 4; i++)
-        network[i] = localIP[i] & subnet[i];
+    for (int i = 0; i < 4; i++) network[i] = localIP[i] & subnet[i];
 
     for (int host = SERVER_SCAN_START; host <= SERVER_SCAN_END; host++)
     {
-        IPAddress targetIP(network[0], network[1], network[2], host);
+        if (diagnosticBusy) return false;
 
-        if (targetIP == localIP)
-            continue;
+        IPAddress targetIP(network[0], network[1], network[2], host);
+        if (targetIP == localIP) continue;
 
         Serial.print("Checking ");
         Serial.print(targetIP);
@@ -393,9 +305,9 @@ bool discoverServer()
 
         if (testServer(targetIP.toString()))
         {
+            if (diagnosticBusy) return false;
             serverURL = "http://" + targetIP.toString() + ":" + String(SERVER_PORT) + String(API_PATH);
             serverFound = true;
-
             Serial.println();
             Serial.println("==========================================");
             Serial.println("       NODE.JS SERVER FOUND");
@@ -414,19 +326,24 @@ bool discoverServer()
 
 bool testServer(const String &ip)
 {
+    if (diagnosticBusy) return false;
+
     WiFiClient client;
     client.setTimeout(SERVER_SCAN_TIMEOUT);
+    if (!client.connect(ip.c_str(), SERVER_PORT)) return false;
 
-    if (!client.connect(ip.c_str(), SERVER_PORT))
-        return false;
-
-    client.print(String("GET ") + DISCOVERY_PATH + " HTTP/1.1\r\n" +
-                 "Host: " + ip + "\r\n" +
-                 "Connection: close\r\n\r\n");
+    client.print(String("GET ") + DISCOVERY_PATH + " HTTP/1.1\r\n" + "Host: " + ip + "\r\n" + "Connection: close\r\n\r\n");
 
     unsigned long start = millis();
     while (!client.available() && millis() - start < SERVER_SCAN_TIMEOUT)
+    {
+        if (diagnosticBusy)
+        {
+            client.stop();
+            return false;
+        }
         delay(5);
+    }
 
     if (!client.available())
     {
@@ -437,18 +354,15 @@ bool testServer(const String &ip)
     String statusLine = client.readStringUntil('\n');
     client.stop();
     statusLine.trim();
-
     return statusLine.startsWith("HTTP/");
 }
 
 void reconnectWiFi()
 {
-    if (setupMode || WiFi.status() == WL_CONNECTED)
-        return;
+    if (setupMode || diagnosticBusy || WiFi.status() == WL_CONNECTED) return;
 
     reconnectCount++;
     Serial.println("WiFi Lost... Trying to reconnect...");
-
     if (connectToWiFi())
     {
         serverFound = false;
@@ -456,90 +370,46 @@ void reconnectWiFi()
     }
 }
 
-#ifdef STRESS_TEST_ENABLED
-void stressCPU(unsigned long durationMs)
-{
-    unsigned long start = millis();
-    volatile double x = 1.0;
-    while (millis() - start < durationMs)
-        x += sin(x) * cos(x);
-}
-
-void stressRAM()
-{
-    const int chunkSize = 1024;
-    const int numChunks = 50;
-    void* chunks[numChunks];
-
-    for (int i = 0; i < numChunks; i++)
-    {
-        chunks[i] = malloc(chunkSize);
-        if (chunks[i]) memset(chunks[i], 0xFF, chunkSize);
-        delay(50);
-    }
-
-    delay(3000);
-
-    for (int i = 0; i < numChunks; i++)
-        if (chunks[i]) free(chunks[i]);
-}
-#endif
-
 void sendData()
 {
+    if (diagnosticBusy) return;
     reconnectWiFi();
-
-    if (WiFi.status() != WL_CONNECTED)
-        return;
+    if (diagnosticBusy || WiFi.status() != WL_CONNECTED) return;
 
     if (!serverFound || serverURL.length() == 0)
     {
         Serial.println("No server URL available. Trying server discovery...");
-        if (!discoverServer())
-            return;
+        if (diagnosticBusy || !discoverServer()) return;
     }
-
-#ifdef STRESS_TEST_ENABLED
-    stressCPU(2000);
-    stressRAM();
-#endif
 
     int lm35Raw = analogRead(LM35_PIN);
     float voltage = (lm35Raw * 3.3f) / 4095.0f;
     float externalTemperature = voltage * 100.0f;
-
     int gasAnalog = analogRead(MQ2_ANALOG_PIN);
     int gasDigital = digitalRead(MQ2_DIGITAL_PIN);
     int humidityState = digitalRead(HR202_PIN);
-
     float cpuTemperature = temperatureRead();
     uint32_t totalRAM = ESP.getHeapSize();
     uint32_t freeRAM = ESP.getFreeHeap();
     uint32_t usedRAM = totalRAM - freeRAM;
     uint32_t minFreeRAM = ESP.getMinFreeHeap();
-
     int cpuFrequency = getCpuFrequencyMhz();
     int cpuCores = ESP.getChipCores();
     int activeCore = xPortGetCoreID();
-
     uint32_t flashSize = ESP.getFlashChipSize();
     uint32_t sketchSize = ESP.getSketchSize();
     uint32_t freeSketch = ESP.getFreeSketchSpace();
     uint32_t chipRevision = ESP.getChipRevision();
-
     String chipModel = ESP.getChipModel();
     String sdkVersion = ESP.getSdkVersion();
-
     String ipAddress = WiFi.localIP().toString();
     String gateway = WiFi.gatewayIP().toString();
     String subnet = WiFi.subnetMask().toString();
     String dns = WiFi.dnsIP().toString();
     String macAddress = WiFi.macAddress();
     String hostname = WiFi.getHostname();
-
     int wifiRSSI = WiFi.RSSI();
     String wifiStatus = WiFi.status() == WL_CONNECTED ? "Connected" : "Disconnected";
-
     String status = "NORMAL";
 
     if (gasAnalog > 2500 || freeRAM < 80000 || externalTemperature > 50)
@@ -552,13 +422,9 @@ void sendData()
         status = "WARNING";
         digitalWrite(LED_PIN, LOW);
     }
-    else
-    {
-        digitalWrite(LED_PIN, LOW);
-    }
+    else digitalWrite(LED_PIN, LOW);
 
     StaticJsonDocument<2048> json;
-
     json["node_name"] = nodeName;
     json["node_type"] = "esp32";
     json["cpu_temperature"] = cpuTemperature;
@@ -593,7 +459,6 @@ void sendData()
 
     String output;
     serializeJsonPretty(json, output);
-
     Serial.println();
     Serial.println("==========================================");
     Serial.println("ESP32 MONITORING DATA");
@@ -603,12 +468,8 @@ void sendData()
     HTTPClient http;
     http.begin(serverURL);
     http.addHeader("Content-Type", "application/json");
-
     lastHTTPResponse = http.POST(output);
-
-    Serial.print("HTTP Response Code : ");
-    Serial.println(lastHTTPResponse);
-
+    Serial.print("HTTP Response Code : "); Serial.println(lastHTTPResponse);
     if (lastHTTPResponse > 0)
     {
         Serial.print("Server Response : ");
@@ -620,7 +481,6 @@ void sendData()
         serverFound = false;
         serverURL = "";
     }
-
     http.end();
 }
 
@@ -633,7 +493,15 @@ void loop()
         return;
     }
 
+    if (diagnosticBusy)
+    {
+        delay(5);
+        return;
+    }
+
     reconnectWiFi();
+
+    if (diagnosticBusy) return;
 
     if (millis() - lastSend >= SEND_INTERVAL)
     {
