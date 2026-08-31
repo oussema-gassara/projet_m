@@ -84,8 +84,7 @@ def main():
             time.sleep(2)
             ser.reset_input_buffer()
 
-            # First identify the board.
-            identify = query(ser, "IDENTIFY", timeout=5)
+            identify = query(ser, "IDENTIFY", timeout=5, expected="IDENTIFY")
             if "raw" in identify:
                 print("No valid IDENTIFY response.")
                 print("This port may not be an ESP32 diagnostic port.")
@@ -97,29 +96,34 @@ def main():
             print("Node:", node)
             print("MAC :", mac)
 
-            # IMPORTANT: scan before DIAG. We verified manually that WIFI_SCAN
-            # works in this state, while DIAG followed by WIFI_SCAN can leave
-            # the Wi-Fi scan with zero networks.
-            wifi = query(ser, "WIFI_SCAN", timeout=20, expected="WIFI_SCAN")
-            print_result("Wi-Fi scan", wifi)
+            # Scan first. This is known to work reliably on the current firmware.
+            wifi_scan = query(ser, "WIFI_SCAN", timeout=20, expected="WIFI_SCAN")
+            print_result("Wi-Fi scan", wifi_scan)
 
-            if "raw" not in wifi:
-                found = wifi.get("networks_found", 0)
-                hardware = wifi.get("wifi_hardware", "UNKNOWN")
+            if "raw" not in wifi_scan:
+                found = wifi_scan.get("networks_found", 0)
+                hardware = wifi_scan.get("wifi_hardware", "UNKNOWN")
                 print()
                 print("Wi-Fi Summary:")
                 print("  Wi-Fi hardware :", hardware)
                 print("  Networks found :", found)
 
-                networks = wifi.get("networks", [])
-                for network in networks:
+                for network in wifi_scan.get("networks", []):
                     print(
                         f"  - {network.get('ssid', '<hidden>')} "
                         f"(RSSI {network.get('rssi', '?')} dBm, "
                         f"channel {network.get('channel', '?')})"
                     )
 
-            # Run the hardware/system diagnostic AFTER the Wi-Fi scan.
+            # Check current Wi-Fi state separately from the scan.
+            wifi_status = query(ser, "WIFI_STATUS", timeout=5, expected="WIFI_STATUS")
+            print_result("Wi-Fi status", wifi_status)
+
+            # Check whether the ESP32 can reach the Node.js server.
+            server = query(ser, "SERVER_CHECK", timeout=30, expected="SERVER_CHECK")
+            print_result("Server check", server)
+
+            # Hardware diagnostic is last so it cannot affect the Wi-Fi scan.
             diag = query(ser, "DIAG", timeout=5, expected="DIAG")
             print_result("Diagnostic", diag)
             print()
