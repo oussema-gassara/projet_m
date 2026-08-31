@@ -2,7 +2,6 @@
 #include <ArduinoJson.h>
 #include <esp_system.h>
 
-// These variables already exist in espMonitoring.ino.ino
 extern String nodeName;
 extern bool setupMode;
 
@@ -16,69 +15,39 @@ static void sendHardwareDiagnostic();
 void startDiagnosticTask()
 {
     static bool started = false;
-
-    if (started)
-        return;
-
+    if (started) return;
     started = true;
 
-    xTaskCreatePinnedToCore(
-        diagnosticTask,
-        "DiagnosticTask",
-        8192,
-        nullptr,
-        1,
-        nullptr,
-        1);
+    xTaskCreatePinnedToCore(diagnosticTask, "DiagnosticTask", 8192, nullptr, 1, nullptr, 1);
 }
 
 static void diagnosticTask(void *parameter)
 {
     (void)parameter;
-
     for (;;)
     {
         if (Serial.available())
         {
             String command = Serial.readStringUntil('\n');
             command.trim();
-
-            if (command.length() > 0)
-                handleDiagnosticCommand(command);
+            if (command.length() > 0) handleDiagnosticCommand(command);
         }
-
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
 
 static void handleDiagnosticCommand(const String &command)
 {
-    if (command == "PING")
-    {
-        Serial.println("{\"response\":\"PONG\"}");
-    }
-    else if (command == "IDENTIFY")
-    {
-        sendIdentify();
-    }
-    else if (command == "WIFI_SCAN")
-    {
-        sendWifiScan();
-    }
-    else if (command == "WIFI_STATUS")
-    {
-        sendWifiStatus();
-    }
-    else if (command == "DIAG")
-    {
-        sendHardwareDiagnostic();
-    }
+    if (command == "PING") Serial.println("{\"response\":\"PONG\"}");
+    else if (command == "IDENTIFY") sendIdentify();
+    else if (command == "WIFI_SCAN") sendWifiScan();
+    else if (command == "WIFI_STATUS") sendWifiStatus();
+    else if (command == "DIAG") sendHardwareDiagnostic();
 }
 
 static void sendIdentify()
 {
     StaticJsonDocument<512> json;
-
     json["diagnostic"] = "IDENTIFY";
     json["node_name"] = nodeName;
     json["node_type"] = "esp32";
@@ -98,12 +67,16 @@ static void sendWifiScan()
 
     json["diagnostic"] = "WIFI_SCAN";
     json["status"] = "SCANNING";
+    json["setup_mode_before_scan"] = setupMode;
 
-    // This scan deliberately does not use any SSID or password.
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect(false, false);
+    // Keep the current Wi-Fi connection alive while scanning.
+    // Disconnecting here can race with the main firmware Wi-Fi logic.
+    if (setupMode) WiFi.mode(WIFI_AP_STA);
+    else WiFi.mode(WIFI_STA);
+
     delay(100);
 
+    // Blocking scan: wait for the scan to finish before answering UART.
     int count = WiFi.scanNetworks(false, true);
 
     if (count < 0)
@@ -126,19 +99,15 @@ static void sendWifiScan()
         }
     }
 
-    json["setup_mode_before_scan"] = setupMode;
-
     String output;
     serializeJson(json, output);
     Serial.println(output);
-
     WiFi.scanDelete();
 }
 
 static void sendWifiStatus()
 {
     StaticJsonDocument<1024> json;
-
     wl_status_t status = WiFi.status();
 
     json["diagnostic"] = "WIFI_STATUS";
@@ -162,7 +131,6 @@ static void sendWifiStatus()
 static void sendHardwareDiagnostic()
 {
     StaticJsonDocument<1024> json;
-
     json["diagnostic"] = "DIAG";
     json["uart"] = "OK";
     json["cpu"] = "OK";
