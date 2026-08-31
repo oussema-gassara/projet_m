@@ -96,7 +96,6 @@ def main():
             print("Node:", node)
             print("MAC :", mac)
 
-            # Scan first. This is known to work reliably on the current firmware.
             wifi_scan = query(ser, "WIFI_SCAN", timeout=20, expected="WIFI_SCAN")
             print_result("Wi-Fi scan", wifi_scan)
 
@@ -115,15 +114,18 @@ def main():
                         f"channel {network.get('channel', '?')})"
                     )
 
-            # Check current Wi-Fi state separately from the scan.
+            # The scan can temporarily leave the station disconnected.
+            # Reconnect using the ESP32's saved SSID/password before checking
+            # the current Wi-Fi state and the Node.js server.
+            wifi_connect = query(ser, "WIFI_CONNECT", timeout=25, expected="WIFI_CONNECT")
+            print_result("Wi-Fi connect", wifi_connect)
+
             wifi_status = query(ser, "WIFI_STATUS", timeout=5, expected="WIFI_STATUS")
             print_result("Wi-Fi status", wifi_status)
 
-            # Check whether the ESP32 can reach the Node.js server.
-            server = query(ser, "SERVER_CHECK", timeout=30, expected="SERVER_CHECK")
+            server = query(ser, "SERVER_CHECK", timeout=35, expected="SERVER_CHECK")
             print_result("Server check", server)
 
-            # Hardware diagnostic is last so it cannot affect the Wi-Fi scan.
             diag = query(ser, "DIAG", timeout=5, expected="DIAG")
             print_result("Diagnostic", diag)
             print()
