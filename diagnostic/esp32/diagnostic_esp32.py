@@ -10,16 +10,23 @@ except ImportError:
     sys.exit(1)
 
 BAUDRATE = 115200
-TIMEOUT = 3
+DEFAULT_TIMEOUT = 5
 
 
-def query(ser, command, timeout=TIMEOUT, expected=None):
+def query(ser, command, timeout=DEFAULT_TIMEOUT, expected=None):
+    """Send a diagnostic command and return its JSON response.
+
+    ESP32 may print normal monitoring/discovery messages before, during, or
+    after the JSON response. Only a JSON object with the expected diagnostic
+    name is accepted as the command result; all other serial lines are ignored.
+    """
     ser.reset_input_buffer()
     ser.write((command + "\n").encode())
     ser.flush()
 
     deadline = time.time() + timeout
     lines = []
+
     while time.time() < deadline:
         raw = ser.readline()
         if not raw:
@@ -31,13 +38,20 @@ def query(ser, command, timeout=TIMEOUT, expected=None):
 
         lines.append(line)
 
-        if line.startswith("{") and line.endswith("}"):
-            try:
-                data = json.loads(line)
-                if expected is None or data.get("diagnostic") == expected:
-                    return data
-            except json.JSONDecodeError:
-                pass
+        # Ignore normal ESP32 text such as:
+        #   Checking 192.168.100.20...
+        #   WiFi Connected!
+        # and keep looking for the actual JSON response.
+        if not (line.startswith("{") and line.endswith("}")):
+            continue
+
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        if expected is None or data.get("diagnostic") == expected:
+            return data
 
     return {"raw": lines}
 
@@ -84,7 +98,7 @@ def main():
             time.sleep(2)
             ser.reset_input_buffer()
 
-            identify = query(ser, "IDENTIFY", timeout=5, expected="IDENTIFY")
+            identify = query(ser, "IDENTIFY", timeout=8, expected="IDENTIFY")
             if "raw" in identify:
                 print("No valid IDENTIFY response.")
                 print("This port may not be an ESP32 diagnostic port.")
@@ -96,7 +110,7 @@ def main():
             print("Node:", node)
             print("MAC :", mac)
 
-            wifi_scan = query(ser, "WIFI_SCAN", timeout=20, expected="WIFI_SCAN")
+            wifi_scan = query(ser, "WIFI_SCAN", timeout=30, expected="WIFI_SCAN")
             print_result("Wi-Fi scan", wifi_scan)
 
             if "raw" not in wifi_scan:
@@ -114,19 +128,24 @@ def main():
                         f"channel {network.get('channel', '?')})"
                     )
 
-            # The scan can temporarily leave the station disconnected.
-            # Reconnect using the ESP32's saved SSID/password before checking
-            # the current Wi-Fi state and the Node.js server.
-            wifi_connect = query(ser, "WIFI_CONNECT", timeout=25, expected="WIFI_CONNECT")
+            # WIFI_CONNECT can take as long as the firmware's connection
+            # timeout. The normal ESP32 text printed by connectToWiFi() is
+            # ignored until the WIFI_CONNECT JSON object arrives.
+            wifi_connect = query(
+                ser, "WIFI_CONNECT", timeout=45, expected="WIFI_CONNECT"
+            )
             print_result("Wi-Fi connect", wifi_connect)
 
-            wifi_status = query(ser, "WIFI_STATUS", timeout=5, expected="WIFI_STATUS")
+            wifi_status = query(ser, "WIFI_STATUS", timeout=8, expected="WIFI_STATUS")
             print_result("Wi-Fi status", wifi_status)
 
-            server = query(ser, "SERVER_CHECK", timeout=35, expected="SERVER_CHECK")
+            # SERVER_CHECK may perform a local-network discovery. Give it
+            # enough time to finish instead of treating discovery log lines
+            # as a failed JSON response.
+            server = query(ser, "SERVER_CHECK", timeout=120, expected="SERVER_CHECK")
             print_result("Server check", server)
 
-            diag = query(ser, "DIAG", timeout=5, expected="DIAG")
+            diag = query(ser, "DIAG", timeout=10, expected="DIAG")
             print_result("Diagnostic", diag)
             print()
 
