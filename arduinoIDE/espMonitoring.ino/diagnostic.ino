@@ -54,10 +54,6 @@ static void diagnosticTask(void *parameter)
 
 static void handleDiagnosticCommand(const String &command)
 {
-    // DIAG_BEGIN keeps the normal monitoring loop paused across the complete
-    // multi-command diagnostic sequence. Previously diagnosticBusy was
-    // released between WIFI_SCAN and WIFI_CONNECT, which allowed the normal
-    // loop to start its own server discovery in parallel with SERVER_CHECK.
     if (command == "DIAG_BEGIN")
     {
         diagnosticSessionActive = true;
@@ -99,8 +95,6 @@ static void handleDiagnosticCommand(const String &command)
     Serial.flush();
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // Outside a diagnostic session, preserve the old one-command behavior.
-    // During a session diagnosticBusy stays true until DIAG_END.
     if (!diagnosticSessionActive)
         diagnosticBusy = false;
 }
@@ -126,7 +120,6 @@ static void sendWifiScan()
     JsonArray networks = json["networks"].to<JsonArray>();
 
     json["diagnostic"] = "WIFI_SCAN";
-    json["status"] = "SCANNING";
     json["setup_mode_before_scan"] = setupMode;
 
     if (setupMode)
@@ -134,17 +127,46 @@ static void sendWifiScan()
     else
         WiFi.mode(WIFI_STA);
 
-    delay(100);
+    // Clear any stale scan result before starting a diagnostic scan.
+    WiFi.scanDelete();
+    delay(250);
 
-    int count = WiFi.scanNetworks(false, true);
+    int count = -2;
+    int attempts = 0;
+    const int maxAttempts = 3;
+
+    // scanNetworks() can temporarily return a negative code when the Wi-Fi
+    // driver is busy. Retry before classifying the scan as failed.
+    for (attempts = 1; attempts <= maxAttempts; attempts++)
+    {
+        count = WiFi.scanNetworks(false, true);
+        if (count >= 0)
+            break;
+
+        WiFi.scanDelete();
+        delay(500);
+
+        if (setupMode)
+            WiFi.mode(WIFI_AP_STA);
+        else
+            WiFi.mode(WIFI_STA);
+    }
+
+    json["scan_attempts"] = attempts > maxAttempts ? maxAttempts : attempts;
+    json["scan_code"] = count;
 
     if (count < 0)
     {
-        json["wifi_hardware"] = "SUSPECT";
+        // A failed scan is not enough evidence to declare the radio hardware
+        // defective. Report the scan failure explicitly and let the host
+        // diagnostic distinguish it from a true no-network condition.
+        json["status"] = "SCAN_FAILED";
+        json["wifi_hardware"] = "UNKNOWN";
         json["networks_found"] = 0;
     }
     else
     {
+        json["status"] = count == 0 ? "NO_NETWORKS" : "NETWORKS_FOUND";
         json["wifi_hardware"] = "OK";
         json["networks_found"] = count;
 
@@ -254,8 +276,6 @@ static void sendServerCheck()
         }
     }
 
-    // serverURL is the POST endpoint used by normal monitoring (/api/data).
-    // For diagnostics use the dedicated GET endpoint /api/discovery.
     String discoveryURL = serverURL;
     discoveryURL.replace(String(API_PATH), String(DISCOVERY_PATH));
 
