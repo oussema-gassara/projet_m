@@ -138,7 +138,35 @@
   color: white;
 }
 
-.diagnostic-button:hover,
+.diagnostic-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.diagnostic-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 11px;
+  border: 1px solid #d1d5db;
+  border-radius: 7px;
+  font-weight: normal;
+  line-height: 1.4;
+}
+
+.diagnostic-result-ok {
+  border-color: #22c55e;
+}
+
+.diagnostic-result-warning {
+  border-color: #eab308;
+}
+
+.diagnostic-result-error {
+  border-color: #ef4444;
+}
+
+.diagnostic-button:hover:not(:disabled),
 .esp-setup-actions button:hover,
 .esp-monitoring-heading button:hover {
   opacity: 0.9;
