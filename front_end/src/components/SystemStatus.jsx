@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 
-export default function SystemStatus({ system }) {
+export default function SystemStatus({ system, onDiagnostic }) {
   const [, forceTick] = useState(0);
 
   useEffect(() => {
@@ -19,19 +19,18 @@ export default function SystemStatus({ system }) {
       />
 
       <span>
-        System Availability:{" "}
-        {online ? (
-          "Online"
-        ) : (
-          <>
-            <span>Offline (Problème de connexion)</span>
-            <p>
-              Connectez-vous au réseau ESP32-SETUP et entrez votre SSID et
-              votre mot de passe sous ce lien : <a href="http://192.168.4.1" target="_blank" rel="noopener noreferrer">http://192.168.4.1</a>
-            </p>
-          </>
-        )}
+        System Availability: {online ? "Online" : "Offline (Problème de connexion)"}
       </span>
+
+      {!online && (
+        <button
+          type="button"
+          className="diagnostic-button"
+          onClick={onDiagnostic}
+        >
+          Lancer le diagnostic
+        </button>
+      )}
     </div>
   );
 }
