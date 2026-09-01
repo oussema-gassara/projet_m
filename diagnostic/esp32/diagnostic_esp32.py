@@ -77,8 +77,6 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
     node = identify.get("node_name", "unknown") if valid(identify) else "unknown"
     mac = identify.get("mac", "unknown") if valid(identify) else "unknown"
 
-    # If IDENTIFY happened while the Wi-Fi driver was temporarily reset,
-    # prefer the valid MAC returned by the hardware diagnostic.
     if mac in (None, "", "00:00:00:00:00:00") and valid(diag):
         diag_mac = diag.get("mac")
         if diag_mac not in (None, "", "00:00:00:00:00:00"):
@@ -136,7 +134,6 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
             )
             return result
 
-    # A successful Wi-Fi connection is stronger evidence than the scan result.
     if connected:
         if not valid(server):
             result.update(
@@ -161,6 +158,33 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
         )
         return result
 
+    if wifi_hardware == "SUSPECT":
+        result.update(
+            code="WIFI_HARDWARE_SUSPECT",
+            severity="ERROR",
+            message="Vérifier le module Wi-Fi de l'ESP32.",
+        )
+        return result
+
+    # If the ESP32 cannot connect with its saved Wi-Fi configuration, expose
+    # one simple actionable message to the user. This has priority over a
+    # failed scan because a scan failure can be temporary while the configured
+    # access point is unavailable.
+    if valid(wifi_connect) and wifi_connect.get("status") in (
+        "NO_SSID_CONFIGURED",
+        "CONNECTION_FAILED",
+    ):
+        return wifi_config_error(result)
+
+    if configured_ssid and valid(wifi_scan) and scan_status != "SCAN_FAILED":
+        ssid_detected = configured_ssid in network_names
+        result["ssid_detected"] = ssid_detected
+        if not ssid_detected:
+            return wifi_config_error(result)
+
+    if valid(wifi_scan) and scan_status != "SCAN_FAILED" and networks_found == 0:
+        return wifi_config_error(result)
+
     if not valid(wifi_scan):
         result.update(
             code="WIFI_SCAN_NO_RESPONSE",
@@ -176,32 +200,6 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
             message="Impossible d'effectuer le scan Wi-Fi.",
         )
         return result
-
-    if wifi_hardware == "SUSPECT":
-        result.update(
-            code="WIFI_HARDWARE_SUSPECT",
-            severity="ERROR",
-            message="Vérifier le module Wi-Fi de l'ESP32.",
-        )
-        return result
-
-    # User-facing diagnosis is intentionally simple: whether the SSID is
-    # absent, not configured, or the password/authentication fails, expose one
-    # single actionable problem.
-    if valid(wifi_connect) and wifi_connect.get("status") == "NO_SSID_CONFIGURED":
-        return wifi_config_error(result)
-
-    if configured_ssid:
-        ssid_detected = configured_ssid in network_names
-        result["ssid_detected"] = ssid_detected
-        if not ssid_detected:
-            return wifi_config_error(result)
-
-    if valid(wifi_connect) and wifi_connect.get("status") == "CONNECTION_FAILED":
-        return wifi_config_error(result)
-
-    if networks_found == 0:
-        return wifi_config_error(result)
 
     if not valid(wifi_connect):
         result.update(
