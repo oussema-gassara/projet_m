@@ -1,6 +1,12 @@
 import { useState, useEffect } from "react";
 
-export default function SystemStatus({ system, onDiagnostic }) {
+export default function SystemStatus({
+  system,
+  onDiagnostic,
+  diagnosticLoading = false,
+  diagnosticResult = null,
+  diagnosticError = "",
+}) {
   const [, forceTick] = useState(0);
 
   useEffect(() => {
@@ -28,9 +34,31 @@ export default function SystemStatus({ system, onDiagnostic }) {
             type="button"
             className="diagnostic-button"
             onClick={onDiagnostic}
+            disabled={diagnosticLoading || !onDiagnostic}
           >
-            Lancer le diagnostic
+            {diagnosticLoading ? "Diagnostic en cours..." : "Lancer le diagnostic"}
           </button>
+        )}
+
+        {diagnosticError && (
+          <div className="diagnostic-result diagnostic-result-error">
+            {diagnosticError}
+          </div>
+        )}
+
+        {diagnosticResult && (
+          <div
+            className={`diagnostic-result ${
+              diagnosticResult.severity === "OK"
+                ? "diagnostic-result-ok"
+                : "diagnostic-result-warning"
+            }`}
+          >
+            <strong>{diagnosticResult.message || "Diagnostic terminé."}</strong>
+            {diagnosticResult.port && (
+              <span>Port détecté : {diagnosticResult.port}</span>
+            )}
+          </div>
         )}
       </div>
     </div>
