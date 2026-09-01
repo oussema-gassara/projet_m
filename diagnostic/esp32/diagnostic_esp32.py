@@ -33,8 +33,6 @@ def query(ser, command, timeout=DEFAULT_TIMEOUT, expected=None):
 
         lines.append(line)
 
-        # Normal firmware output (Checking..., WiFi Connected!, etc.) is not
-        # a diagnostic response. Keep reading until the expected JSON arrives.
         if not (line.startswith("{") and line.endswith("}")):
             continue
 
@@ -74,9 +72,12 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
     network_names = [n.get("ssid", "") for n in networks]
     networks_found = wifi_scan.get("networks_found", 0) if valid(wifi_scan) else None
     wifi_hardware = wifi_scan.get("wifi_hardware", "UNKNOWN") if valid(wifi_scan) else "UNKNOWN"
+    scan_status = wifi_scan.get("status") if valid(wifi_scan) else None
+    scan_attempts = wifi_scan.get("scan_attempts") if valid(wifi_scan) else None
+    scan_code = wifi_scan.get("scan_code") if valid(wifi_scan) else None
 
     configured_ssid = wifi_connect.get("ssid", "") if valid(wifi_connect) else ""
-    ssid_detected = configured_ssid in network_names if configured_ssid else None
+    ssid_detected = configured_ssid in network_names if configured_ssid and valid(wifi_scan) and scan_status != "SCAN_FAILED" else None
 
     connect_ok = bool(wifi_connect.get("connected")) if valid(wifi_connect) else False
     status_ok = bool(wifi_status.get("connected")) if valid(wifi_status) else False
@@ -87,6 +88,9 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
         "node_name": node,
         "mac": mac,
         "wifi_hardware": wifi_hardware,
+        "wifi_scan_status": scan_status,
+        "wifi_scan_attempts": scan_attempts,
+        "wifi_scan_code": scan_code,
         "networks_found": networks_found,
         "configured_ssid": configured_ssid or None,
         "ssid_detected": ssid_detected,
@@ -113,22 +117,8 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
             )
             return result
 
-    if not valid(wifi_scan):
-        result.update(
-            code="WIFI_SCAN_NO_RESPONSE",
-            severity="ERROR",
-            message="The ESP32 answered on UART, but the Wi-Fi scan did not return a valid response.",
-        )
-        return result
-
-    if wifi_hardware != "OK":
-        result.update(
-            code="WIFI_HARDWARE_SUSPECT",
-            severity="ERROR",
-            message="The ESP32 Wi-Fi scan itself failed. The Wi-Fi subsystem should be checked.",
-        )
-        return result
-
+    # A successful Wi-Fi connection is stronger evidence than a scan result.
+    # A transient scan failure must not hide the fact that Wi-Fi is working.
     if connected:
         if not valid(server):
             result.update(
@@ -168,19 +158,55 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
         )
         return result
 
+    if not valid(wifi_scan):
+        result.update(
+            code="WIFI_SCAN_NO_RESPONSE",
+            severity="ERROR",
+            message="The ESP32 answered on UART, but the Wi-Fi scan did not return a valid response.",
+        )
+        return result
+
+    # A negative Arduino scan result can be transient (driver busy, scan state,
+    # timing). It is not enough evidence to call the radio hardware defective.
+    if scan_status == "SCAN_FAILED":
+        result.update(
+            code="WIFI_SCAN_FAILED",
+            severity="WARNING",
+            message=(
+                f"Wi-Fi scan failed after {scan_attempts or '?'} attempts "
+                f"(scan code {scan_code}). This alone does not prove a hardware failure."
+            ),
+        )
+        return result
+
+    # Reserved for future firmware tests that can explicitly establish a radio
+    # hardware problem with stronger evidence than a single failed scan.
+    if wifi_hardware == "SUSPECT":
+        result.update(
+            code="WIFI_HARDWARE_SUSPECT",
+            severity="ERROR",
+            message="The ESP32 reported evidence of a possible Wi-Fi hardware problem.",
+        )
+        return result
+
+    # If the scan completed successfully, absence of the configured SSID is a
+    # direct and useful diagnosis, even when zero networks were visible.
+    if configured_ssid:
+        ssid_detected = configured_ssid in network_names
+        result["ssid_detected"] = ssid_detected
+        if not ssid_detected:
+            result.update(
+                code="SSID_NOT_FOUND",
+                severity="WARNING",
+                message=f"The configured SSID '{configured_ssid}' was not found in the Wi-Fi scan.",
+            )
+            return result
+
     if networks_found == 0:
         result.update(
             code="NO_WIFI_NETWORKS",
             severity="WARNING",
-            message="The Wi-Fi hardware responded, but no nearby Wi-Fi network was detected.",
-        )
-        return result
-
-    if configured_ssid and ssid_detected is False:
-        result.update(
-            code="SSID_NOT_FOUND",
-            severity="WARNING",
-            message=f"The configured SSID '{configured_ssid}' was not found in the Wi-Fi scan.",
+            message="The Wi-Fi scan completed, but no nearby Wi-Fi network was detected.",
         )
         return result
 
@@ -217,6 +243,8 @@ def print_final(result):
     print("Node             :", result.get("node_name"))
     print("MAC              :", result.get("mac"))
     print("Wi-Fi hardware   :", result.get("wifi_hardware"))
+    print("Wi-Fi scan       :", result.get("wifi_scan_status") or "UNKNOWN")
+    print("Scan attempts    :", result.get("wifi_scan_attempts") if result.get("wifi_scan_attempts") is not None else "-")
     print("Networks found   :", result.get("networks_found"))
     print("Configured SSID  :", result.get("configured_ssid") or "<none>")
 
@@ -297,14 +325,16 @@ def main():
             print("Node:", identify.get("node_name", "unknown"))
             print("MAC :", identify.get("mac", "unknown"))
 
-            wifi_scan = query(ser, "WIFI_SCAN", timeout=30, expected="WIFI_SCAN")
+            wifi_scan = query(ser, "WIFI_SCAN", timeout=45, expected="WIFI_SCAN")
             print_result("Wi-Fi scan", wifi_scan)
 
             if valid(wifi_scan):
                 print()
                 print("Wi-Fi Summary:")
                 print("  Wi-Fi hardware :", wifi_scan.get("wifi_hardware", "UNKNOWN"))
-                print("  Networks found :", wifi_scan.get("networks_found", 0))
+                print("  Scan status     :", wifi_scan.get("status", "UNKNOWN"))
+                print("  Scan attempts   :", wifi_scan.get("scan_attempts", "?"))
+                print("  Networks found  :", wifi_scan.get("networks_found", 0))
 
                 for network in wifi_scan.get("networks", []):
                     print(
