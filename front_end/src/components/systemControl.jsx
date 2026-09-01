@@ -22,8 +22,14 @@ const formatNumber = (value, digits = 2) => {
 
 export default function SystemControl({ nodeName = "esp32-1", testMode = false }) {
     const [system, setSystem] = useState(null);
+    const [diagnosticLoading, setDiagnosticLoading] = useState(false);
+    const [diagnosticResult, setDiagnosticResult] = useState(null);
+    const [diagnosticError, setDiagnosticError] = useState("");
 
     useEffect(() => {
+        setDiagnosticResult(null);
+        setDiagnosticError("");
+
         if (testMode) {
             setSystem(fakeNodeData[nodeName]?.system || null);
             return;
@@ -41,10 +47,66 @@ export default function SystemControl({ nodeName = "esp32-1", testMode = false }
         return () => clearInterval(interval);
     }, [testMode, nodeName]);
 
+    const handleDiagnostic = async () => {
+        if (diagnosticLoading) return;
+
+        setDiagnosticLoading(true);
+        setDiagnosticResult(null);
+        setDiagnosticError("");
+
+        if (testMode) {
+            setDiagnosticResult({
+                node_name: nodeName,
+                port: "SIMULATION",
+                code: "TEST_DIAGNOSTIC",
+                severity: "WARNING",
+                message: "Diagnostic simulé en mode test.",
+            });
+            setDiagnosticLoading(false);
+            return;
+        }
+
+        try {
+            const response = await fetch(
+                "http://localhost:3000/api/diagnostic/esp32",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        node_name: nodeName,
+                    }),
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.message || "Impossible de lancer le diagnostic.");
+            }
+
+            setDiagnosticResult(data);
+        } catch (error) {
+            console.error(error);
+            setDiagnosticError(
+                error.message || "Impossible de contacter le service de diagnostic."
+            );
+        } finally {
+            setDiagnosticLoading(false);
+        }
+    };
+
     return (
         <>
             <div className="system-status">
-                <SystemStatus system={system} />
+                <SystemStatus
+                    system={system}
+                    onDiagnostic={handleDiagnostic}
+                    diagnosticLoading={diagnosticLoading}
+                    diagnosticResult={diagnosticResult}
+                    diagnosticError={diagnosticError}
+                />
             </div>
             <div className="system-control">
                 <h2>Contrôle du système {testMode && "(TEST)"}</h2>
@@ -84,7 +146,7 @@ export default function SystemControl({ nodeName = "esp32-1", testMode = false }
                             const level = getLevel(usedPct, 70, 90);
                             return (
                                 <p>
-                                    Pourcentage de RAM utilisée :{" "}
+                                    Pourcentage de RAM utilisée:{" "}
                                     <span className={clsx("metric-value", {
                                         "metric-good": level === "good",
                                         "metric-warning": level === "warning",
