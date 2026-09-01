@@ -24,21 +24,13 @@ export default function SystemStatus({ system, onDiagnostic }) {
         </span>
 
         {!online && (
-          <>
-            <p className="setup-hint">
-              Si la carte n&apos;est pas encore configurée, connectez-vous au réseau
-              ESP32-SETUP puis ouvrez http://192.168.4.1 pour saisir le SSID et le
-              mot de passe Wi-Fi.
-            </p>
-
-            <button
-              type="button"
-              className="diagnostic-button"
-              onClick={onDiagnostic}
-            >
-              Lancer le diagnostic
-            </button>
-          </>
+          <button
+            type="button"
+            className="diagnostic-button"
+            onClick={onDiagnostic}
+          >
+            Lancer le diagnostic
+          </button>
         )}
       </div>
     </div>
