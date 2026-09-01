@@ -2,6 +2,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <esp_system.h>
+#include <esp_mac.h>
 
 extern String nodeName;
 extern String wifiSSID;
@@ -17,6 +18,7 @@ static bool diagnosticSessionActive = false;
 
 static void diagnosticTask(void *parameter);
 static void handleDiagnosticCommand(const String &command);
+static String getStableMac();
 static void sendIdentify();
 static void sendWifiScan();
 static void sendWifiConnect();
@@ -99,13 +101,29 @@ static void handleDiagnosticCommand(const String &command)
         diagnosticBusy = false;
 }
 
+static String getStableMac()
+{
+    uint8_t mac[6] = {0};
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK)
+        return WiFi.macAddress();
+
+    char buffer[18];
+    snprintf(
+        buffer,
+        sizeof(buffer),
+        "%02X:%02X:%02X:%02X:%02X:%02X",
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+    );
+    return String(buffer);
+}
+
 static void sendIdentify()
 {
     StaticJsonDocument<512> json;
     json["diagnostic"] = "IDENTIFY";
     json["node_name"] = nodeName;
     json["node_type"] = "esp32";
-    json["mac"] = WiFi.macAddress();
+    json["mac"] = getStableMac();
     json["chip_model"] = ESP.getChipModel();
     json["chip_revision"] = ESP.getChipRevision();
 
@@ -127,7 +145,6 @@ static void sendWifiScan()
     else
         WiFi.mode(WIFI_STA);
 
-    // Clear any stale scan result before starting a diagnostic scan.
     WiFi.scanDelete();
     delay(250);
 
@@ -135,8 +152,6 @@ static void sendWifiScan()
     int attempts = 0;
     const int maxAttempts = 3;
 
-    // scanNetworks() can temporarily return a negative code when the Wi-Fi
-    // driver is busy. Retry before classifying the scan as failed.
     for (attempts = 1; attempts <= maxAttempts; attempts++)
     {
         count = WiFi.scanNetworks(false, true);
@@ -157,9 +172,6 @@ static void sendWifiScan()
 
     if (count < 0)
     {
-        // A failed scan is not enough evidence to declare the radio hardware
-        // defective. Report the scan failure explicitly and let the host
-        // diagnostic distinguish it from a true no-network condition.
         json["status"] = "SCAN_FAILED";
         json["wifi_hardware"] = "UNKNOWN";
         json["networks_found"] = 0;
@@ -204,7 +216,7 @@ static void sendWifiConnect()
         json["rssi"] = WiFi.RSSI();
         json["ip"] = WiFi.localIP().toString();
         json["gateway"] = WiFi.gatewayIP().toString();
-        json["mac"] = WiFi.macAddress();
+        json["mac"] = getStableMac();
     }
     else
     {
@@ -226,6 +238,7 @@ static void sendWifiStatus()
     json["diagnostic"] = "WIFI_STATUS";
     json["connected"] = (status == WL_CONNECTED);
     json["status_code"] = (int)status;
+    json["mac"] = getStableMac();
 
     if (status == WL_CONNECTED)
     {
@@ -233,7 +246,6 @@ static void sendWifiStatus()
         json["rssi"] = WiFi.RSSI();
         json["ip"] = WiFi.localIP().toString();
         json["gateway"] = WiFi.gatewayIP().toString();
-        json["mac"] = WiFi.macAddress();
     }
 
     String output;
@@ -326,7 +338,7 @@ static void sendHardwareDiagnostic()
     json["total_ram"] = ESP.getHeapSize();
     json["flash_size"] = ESP.getFlashChipSize();
     json["chip_model"] = ESP.getChipModel();
-    json["mac"] = WiFi.macAddress();
+    json["mac"] = getStableMac();
 
     String output;
     serializeJson(json, output);
