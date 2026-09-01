@@ -98,7 +98,6 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
         "server_http_code": server.get("http_code") if valid(server) else None,
     }
 
-    # Hardware diagnostic has highest priority after UART/IDENTIFY succeeded.
     if valid(diag):
         suspect_parts = [
             part
@@ -130,8 +129,6 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
         )
         return result
 
-    # If connection succeeded, it is authoritative even if a hidden SSID was
-    # absent from the visible scan list.
     if connected:
         if not valid(server):
             result.update(
@@ -163,7 +160,6 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
         result.update(code=code, severity="WARNING", message=message)
         return result
 
-    # From here the ESP32 is not connected to its configured Wi-Fi.
     if valid(wifi_connect) and wifi_connect.get("status") == "NO_SSID_CONFIGURED":
         result.update(
             code="NO_SSID_CONFIGURED",
@@ -196,9 +192,6 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
         )
         return result
 
-    # The ESP32 Arduino status alone cannot prove that the password is wrong.
-    # If the SSID is visible but connection fails, credentials/configuration are
-    # the most useful diagnosis without making a false certainty claim.
     if wifi_connect.get("status") == "CONNECTION_FAILED":
         result.update(
             code="WIFI_CREDENTIALS_OR_CONFIG_ERROR",
@@ -249,8 +242,6 @@ def print_final(result):
     print("RESULT           :", result.get("code"))
     print("MESSAGE          :", result.get("message"))
     print("========================================")
-
-    # One-line machine-readable result for the future Node.js/React integration.
     print("FINAL_RESULT_JSON=" + json.dumps(result, ensure_ascii=False))
 
 
@@ -278,10 +269,23 @@ def main():
     for port in detected:
         print(f"--- Testing {port} ---")
         ser = None
+        session_started = False
+
         try:
             ser = serial.Serial(port, BAUDRATE, timeout=0.2)
             time.sleep(2)
             ser.reset_input_buffer()
+
+            session = query(
+                ser, "DIAG_BEGIN", timeout=8, expected="DIAG_SESSION"
+            )
+            if not valid(session) or session.get("status") != "STARTED":
+                print("Unable to start a diagnostic session.")
+                print("This port may not be an ESP32 diagnostic port or the firmware is outdated.")
+                print()
+                continue
+
+            session_started = True
 
             identify = query(ser, "IDENTIFY", timeout=8, expected="IDENTIFY")
             if not valid(identify):
@@ -340,6 +344,16 @@ def main():
             print()
         finally:
             if ser is not None and ser.is_open:
+                if session_started:
+                    try:
+                        query(
+                            ser,
+                            "DIAG_END",
+                            timeout=5,
+                            expected="DIAG_SESSION",
+                        )
+                    except (serial.SerialException, OSError):
+                        pass
                 ser.close()
 
 
