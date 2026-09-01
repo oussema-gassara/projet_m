@@ -19,6 +19,7 @@ export default function Main() {
     const [testMode, setTestMode] = useState(false);
     const [espNodes, setEspNodes] = useState([]);
     const [nodesError, setNodesError] = useState("");
+    const [espSetupState, setEspSetupState] = useState(null);
 
     const loadNodes = useCallback(async () => {
         if (testMode) {
@@ -149,28 +150,95 @@ export default function Main() {
                 </p>
             </div>
 
-            <h1 style={{ textAlign: "center", width: "100%" }}>
-                Surveillance des ESP32
-            </h1>
-
-            {nodesError && <p className="metric-danger">{nodesError}</p>}
-
-            {!nodesError && espNodes.length === 0 && (
-                <p style={{ textAlign: "center" }}>Aucun nœud ESP32 enregistré.</p>
+            {espSetupState === null && (
+                <section className="esp-setup-panel">
+                    <h2>Configuration des ESP32</h2>
+                    <p>Vos cartes ESP32 sont-elles déjà configurées ?</p>
+                    <div className="esp-setup-actions">
+                        <button
+                            type="button"
+                            className="setup-yes-button"
+                            onClick={() => setEspSetupState("configured")}
+                        >
+                            Oui
+                        </button>
+                        <button
+                            type="button"
+                            className="setup-no-button"
+                            onClick={() => setEspSetupState("setup")}
+                        >
+                            Non
+                        </button>
+                    </div>
+                </section>
             )}
 
-            <div className="esp-nodes-container">
-                {espNodes.map((node) => (
-                    <EspNodeCard
-                        key={node.id || node.node_name}
-                        node={node}
-                        testMode={testMode}
-                        onRemove={isAdmin ? handleRemoveNode : undefined}
-                    />
-                ))}
-            </div>
+            {espSetupState === "setup" && (
+                <section className="esp-setup-panel">
+                    <h2>Configurer une ESP32</h2>
+                    <ol className="esp-setup-steps">
+                        <li>Branchez la carte ESP32.</li>
+                        <li>Connectez votre appareil au réseau Wi-Fi ESP32-SETUP.</li>
+                        <li>
+                            Ouvrez{" "}
+                            <a href="http://192.168.4.1" target="_blank" rel="noopener noreferrer">
+                                http://192.168.4.1
+                            </a>.
+                        </li>
+                        <li>Saisissez le SSID, le mot de passe Wi-Fi et un nom unique pour la carte.</li>
+                    </ol>
+                    <div className="esp-setup-actions">
+                        <button
+                            type="button"
+                            className="setup-yes-button"
+                            onClick={() => setEspSetupState("configured")}
+                        >
+                            J&apos;ai terminé la configuration
+                        </button>
+                        <button
+                            type="button"
+                            className="setup-secondary-button"
+                            onClick={() => setEspSetupState(null)}
+                        >
+                            Retour
+                        </button>
+                    </div>
+                </section>
+            )}
 
-            {isAdmin && <AddNode nodeType="esp32" onAdded={loadNodes} />}
+            {espSetupState === "configured" && (
+                <>
+                    <div className="esp-monitoring-heading">
+                        <h1>Surveillance des ESP32</h1>
+                        <button
+                            type="button"
+                            className="setup-secondary-button"
+                            onClick={() => setEspSetupState("setup")}
+                        >
+                            Configurer une nouvelle ESP32
+                        </button>
+                    </div>
+
+                    {nodesError && <p className="metric-danger">{nodesError}</p>}
+
+                    {!nodesError && espNodes.length === 0 && (
+                        <p style={{ textAlign: "center" }}>Aucun nœud ESP32 enregistré.</p>
+                    )}
+
+                    <div className="esp-nodes-container">
+                        {espNodes.map((node) => (
+                            <EspNodeCard
+                                key={node.id || node.node_name}
+                                node={node}
+                                testMode={testMode}
+                                onRemove={isAdmin ? handleRemoveNode : undefined}
+                            />
+                        ))}
+                    </div>
+
+                    {isAdmin && <AddNode nodeType="esp32" onAdded={loadNodes} />}
+                </>
+            )}
 
             <h1 style={{ textAlign: "center", width: "100%" }}>
                 Surveillance des Raspberry Pi
