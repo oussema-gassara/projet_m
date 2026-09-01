@@ -18,19 +18,29 @@ export default function SystemStatus({ system, onDiagnostic }) {
         className={`status-disc ${online ? "online" : "offline"}`}
       />
 
-      <span>
-        System Availability: {online ? "Online" : "Offline (Problème de connexion)"}
-      </span>
+      <div className="availability-content">
+        <span>
+          System Availability: {online ? "Online" : "Offline (Problème de connexion)"}
+        </span>
 
-      {!online && (
-        <button
-          type="button"
-          className="diagnostic-button"
-          onClick={onDiagnostic}
-        >
-          Lancer le diagnostic
-        </button>
-      )}
+        {!online && (
+          <>
+            <p className="setup-hint">
+              Si la carte n&apos;est pas encore configurée, connectez-vous au réseau
+              ESP32-SETUP puis ouvrez http://192.168.4.1 pour saisir le SSID et le
+              mot de passe Wi-Fi.
+            </p>
+
+            <button
+              type="button"
+              className="diagnostic-button"
+              onClick={onDiagnostic}
+            >
+              Lancer le diagnostic
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
