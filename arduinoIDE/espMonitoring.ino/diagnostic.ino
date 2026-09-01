@@ -13,6 +13,8 @@ extern volatile bool diagnosticBusy;
 extern bool discoverServer();
 extern bool connectToWiFi();
 
+static bool diagnosticSessionActive = false;
+
 static void diagnosticTask(void *parameter);
 static void handleDiagnosticCommand(const String &command);
 static void sendIdentify();
@@ -52,6 +54,29 @@ static void diagnosticTask(void *parameter)
 
 static void handleDiagnosticCommand(const String &command)
 {
+    // DIAG_BEGIN keeps the normal monitoring loop paused across the complete
+    // multi-command diagnostic sequence. Previously diagnosticBusy was
+    // released between WIFI_SCAN and WIFI_CONNECT, which allowed the normal
+    // loop to start its own server discovery in parallel with SERVER_CHECK.
+    if (command == "DIAG_BEGIN")
+    {
+        diagnosticSessionActive = true;
+        diagnosticBusy = true;
+        Serial.println("{\"diagnostic\":\"DIAG_SESSION\",\"status\":\"STARTED\"}");
+        Serial.flush();
+        return;
+    }
+
+    if (command == "DIAG_END")
+    {
+        Serial.println("{\"diagnostic\":\"DIAG_SESSION\",\"status\":\"ENDED\"}");
+        Serial.flush();
+        vTaskDelay(pdMS_TO_TICKS(100));
+        diagnosticSessionActive = false;
+        diagnosticBusy = false;
+        return;
+    }
+
     diagnosticBusy = true;
 
     if (command == "PING")
@@ -73,7 +98,11 @@ static void handleDiagnosticCommand(const String &command)
 
     Serial.flush();
     vTaskDelay(pdMS_TO_TICKS(100));
-    diagnosticBusy = false;
+
+    // Outside a diagnostic session, preserve the old one-command behavior.
+    // During a session diagnosticBusy stays true until DIAG_END.
+    if (!diagnosticSessionActive)
+        diagnosticBusy = false;
 }
 
 static void sendIdentify()
@@ -226,9 +255,7 @@ static void sendServerCheck()
     }
 
     // serverURL is the POST endpoint used by normal monitoring (/api/data).
-    // For diagnostics we test the dedicated GET endpoint /api/discovery so a
-    // healthy backend returns HTTP 200 rather than the 404 produced by GET
-    // requests to the data-ingestion route.
+    // For diagnostics use the dedicated GET endpoint /api/discovery.
     String discoveryURL = serverURL;
     discoveryURL.replace(String(API_PATH), String(DISCOVERY_PATH));
 
