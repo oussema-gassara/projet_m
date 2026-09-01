@@ -67,6 +67,11 @@ router.post("/diagnostic/esp32", (req, res) => {
                 {
                     shell: false,
                     windowsHide: true,
+                    env: {
+                        ...process.env,
+                        PYTHONIOENCODING: "utf-8",
+                        PYTHONUTF8: "1",
+                    },
                 }
             );
 
@@ -84,11 +89,11 @@ router.post("/diagnostic/esp32", (req, res) => {
             }, 300000);
 
             child.stdout.on("data", (chunk) => {
-                stdout += chunk.toString();
+                stdout += chunk.toString("utf8");
             });
 
             child.stderr.on("data", (chunk) => {
-                stderr += chunk.toString();
+                stderr += chunk.toString("utf8");
             });
 
             child.on("error", (error) => {
