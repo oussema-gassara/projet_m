@@ -5,6 +5,9 @@ import clsx from "clsx";
 export default function Rasberry() {
 
     const [rasberry, setRasberry] = useState(null);
+    const [diagnosticLoading, setDiagnosticLoading] = useState(false);
+    const [diagnosticResult, setDiagnosticResult] = useState(null);
+    const [diagnosticError, setDiagnosticError] = useState("");
 
     useEffect(() => {
 
@@ -29,10 +32,55 @@ export default function Rasberry() {
 
     }, []);
 
+    const handleDiagnostic = async () => {
+        if (diagnosticLoading) return;
+
+        setDiagnosticLoading(true);
+        setDiagnosticResult(null);
+        setDiagnosticError("");
+
+        try {
+            const response = await fetch(
+                "http://localhost:3000/api/diagnostic/raspberry",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        node_name: rasberry?.node_name || "raspberry-1",
+                        scenario: "network_error",
+                    }),
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    data.message || "Impossible de lancer le diagnostic Raspberry Pi."
+                );
+            }
+
+            setDiagnosticResult(data);
+        } catch (error) {
+            console.error(error);
+            setDiagnosticError(
+                error.message || "Impossible de contacter le service de diagnostic."
+            );
+        } finally {
+            setDiagnosticLoading(false);
+        }
+    };
+
     return (
         <div className="rasberry-main">
             <div className="rasberry-status">
-                <RasberryStatus rasberry={rasberry} />
+                <RasberryStatus
+                    rasberry={rasberry}
+                    onDiagnostic={handleDiagnostic}
+                    diagnosticLoading={diagnosticLoading}
+                    diagnosticResult={diagnosticResult}
+                    diagnosticError={diagnosticError}
+                />
             </div>
             <div className="rasberry-control">
                 <h2>Rasberry Pi Control</h2>
