@@ -31,9 +31,10 @@
 .availability-container {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-weight: bold;
   font-size: 13px;
+  flex-wrap: wrap;
 }
 
 .status-disc {
@@ -52,6 +53,20 @@
 .status-disc.offline {
   background-color: #ef4444;
   box-shadow: 0 0 8px #ef4444;
+}
+
+.diagnostic-button {
+  border: none;
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-weight: bold;
+  cursor: pointer;
+  background-color: #ef4444;
+  color: white;
+}
+
+.diagnostic-button:hover {
+  opacity: 0.9;
 }
 
 .metric-value {
