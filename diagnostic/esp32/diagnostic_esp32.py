@@ -64,9 +64,25 @@ def print_result(label, result):
         print(f"{label}:", json.dumps(result, indent=2))
 
 
+def wifi_config_error(result):
+    result.update(
+        code="WIFI_SSID_OR_PASSWORD_ERROR",
+        severity="WARNING",
+        message="Vérifier le SSID ou le mot de passe Wi-Fi.",
+    )
+    return result
+
+
 def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server, diag):
     node = identify.get("node_name", "unknown") if valid(identify) else "unknown"
     mac = identify.get("mac", "unknown") if valid(identify) else "unknown"
+
+    # If IDENTIFY happened while the Wi-Fi driver was temporarily reset,
+    # prefer the valid MAC returned by the hardware diagnostic.
+    if mac in (None, "", "00:00:00:00:00:00") and valid(diag):
+        diag_mac = diag.get("mac")
+        if diag_mac not in (None, "", "00:00:00:00:00:00"):
+            mac = diag_mac
 
     networks = wifi_scan.get("networks", []) if valid(wifi_scan) else []
     network_names = [n.get("ssid", "") for n in networks]
@@ -77,7 +93,11 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
     scan_code = wifi_scan.get("scan_code") if valid(wifi_scan) else None
 
     configured_ssid = wifi_connect.get("ssid", "") if valid(wifi_connect) else ""
-    ssid_detected = configured_ssid in network_names if configured_ssid and valid(wifi_scan) and scan_status != "SCAN_FAILED" else None
+    ssid_detected = (
+        configured_ssid in network_names
+        if configured_ssid and valid(wifi_scan) and scan_status != "SCAN_FAILED"
+        else None
+    )
 
     connect_ok = bool(wifi_connect.get("connected")) if valid(wifi_connect) else False
     status_ok = bool(wifi_status.get("connected")) if valid(wifi_status) else False
@@ -112,19 +132,17 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
             result.update(
                 code="HARDWARE_SUSPECT",
                 severity="ERROR",
-                message="Hardware diagnostic reported a suspect component: "
-                + ", ".join(suspect_parts),
+                message="Un composant matériel semble présenter un problème.",
             )
             return result
 
-    # A successful Wi-Fi connection is stronger evidence than a scan result.
-    # A transient scan failure must not hide the fact that Wi-Fi is working.
+    # A successful Wi-Fi connection is stronger evidence than the scan result.
     if connected:
         if not valid(server):
             result.update(
                 code="SERVER_CHECK_NO_RESPONSE",
                 severity="WARNING",
-                message="Wi-Fi is connected, but the server diagnostic did not return a valid response.",
+                message="Impossible de vérifier la connexion au serveur.",
             )
             return result
 
@@ -132,29 +150,14 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
             result.update(
                 code="ESP32_OK",
                 severity="OK",
-                message="ESP32 hardware, Wi-Fi connection and Node.js server communication are operational.",
+                message="ESP32 opérationnel.",
             )
             return result
 
-        server_status = server.get("status", "SERVER_NOT_REACHABLE")
-        if server_status == "SERVER_NOT_FOUND":
-            code = "SERVER_NOT_FOUND"
-            message = "Wi-Fi is working, but the Node.js server was not discovered on the local network."
-        elif server_status == "SERVER_HTTP_ERROR":
-            code = "SERVER_HTTP_ERROR"
-            message = "The server answered, but the diagnostic endpoint returned an HTTP error."
-        else:
-            code = "SERVER_NOT_REACHABLE"
-            message = "Wi-Fi is working, but the Node.js server cannot be reached."
-
-        result.update(code=code, severity="WARNING", message=message)
-        return result
-
-    if valid(wifi_connect) and wifi_connect.get("status") == "NO_SSID_CONFIGURED":
         result.update(
-            code="NO_SSID_CONFIGURED",
+            code="SERVER_NOT_REACHABLE",
             severity="WARNING",
-            message="No Wi-Fi SSID is saved on the ESP32.",
+            message="Vérifier le serveur ou la connexion réseau.",
         )
         return result
 
@@ -162,74 +165,56 @@ def make_diagnosis(port, identify, wifi_scan, wifi_connect, wifi_status, server,
         result.update(
             code="WIFI_SCAN_NO_RESPONSE",
             severity="ERROR",
-            message="The ESP32 answered on UART, but the Wi-Fi scan did not return a valid response.",
+            message="Impossible de vérifier le Wi-Fi.",
         )
         return result
 
-    # A negative Arduino scan result can be transient (driver busy, scan state,
-    # timing). It is not enough evidence to call the radio hardware defective.
     if scan_status == "SCAN_FAILED":
         result.update(
             code="WIFI_SCAN_FAILED",
             severity="WARNING",
-            message=(
-                f"Wi-Fi scan failed after {scan_attempts or '?'} attempts "
-                f"(scan code {scan_code}). This alone does not prove a hardware failure."
-            ),
+            message="Impossible d'effectuer le scan Wi-Fi.",
         )
         return result
 
-    # Reserved for future firmware tests that can explicitly establish a radio
-    # hardware problem with stronger evidence than a single failed scan.
     if wifi_hardware == "SUSPECT":
         result.update(
             code="WIFI_HARDWARE_SUSPECT",
             severity="ERROR",
-            message="The ESP32 reported evidence of a possible Wi-Fi hardware problem.",
+            message="Vérifier le module Wi-Fi de l'ESP32.",
         )
         return result
 
-    # If the scan completed successfully, absence of the configured SSID is a
-    # direct and useful diagnosis, even when zero networks were visible.
+    # User-facing diagnosis is intentionally simple: whether the SSID is
+    # absent, not configured, or the password/authentication fails, expose one
+    # single actionable problem.
+    if valid(wifi_connect) and wifi_connect.get("status") == "NO_SSID_CONFIGURED":
+        return wifi_config_error(result)
+
     if configured_ssid:
         ssid_detected = configured_ssid in network_names
         result["ssid_detected"] = ssid_detected
         if not ssid_detected:
-            result.update(
-                code="SSID_NOT_FOUND",
-                severity="WARNING",
-                message=f"The configured SSID '{configured_ssid}' was not found in the Wi-Fi scan.",
-            )
-            return result
+            return wifi_config_error(result)
+
+    if valid(wifi_connect) and wifi_connect.get("status") == "CONNECTION_FAILED":
+        return wifi_config_error(result)
 
     if networks_found == 0:
-        result.update(
-            code="NO_WIFI_NETWORKS",
-            severity="WARNING",
-            message="The Wi-Fi scan completed, but no nearby Wi-Fi network was detected.",
-        )
-        return result
+        return wifi_config_error(result)
 
     if not valid(wifi_connect):
         result.update(
             code="WIFI_CONNECT_NO_RESPONSE",
             severity="ERROR",
-            message="Wi-Fi networks were detected, but WIFI_CONNECT returned no valid diagnostic response.",
-        )
-        return result
-
-    if wifi_connect.get("status") == "CONNECTION_FAILED":
-        result.update(
-            code="WIFI_CREDENTIALS_OR_CONFIG_ERROR",
-            severity="WARNING",
-            message="The configured SSID is visible, but connection failed. Check password, security mode and Wi-Fi configuration.",
+            message="Impossible de vérifier la connexion Wi-Fi.",
         )
         return result
 
     result.update(
         code="WIFI_NOT_CONNECTED",
         severity="WARNING",
-        message="The ESP32 Wi-Fi subsystem responds, but the board is not connected to Wi-Fi.",
+        message="Vérifier la connexion Wi-Fi.",
     )
     return result
 
@@ -244,7 +229,6 @@ def print_final(result):
     print("MAC              :", result.get("mac"))
     print("Wi-Fi hardware   :", result.get("wifi_hardware"))
     print("Wi-Fi scan       :", result.get("wifi_scan_status") or "UNKNOWN")
-    print("Scan attempts    :", result.get("wifi_scan_attempts") if result.get("wifi_scan_attempts") is not None else "-")
     print("Networks found   :", result.get("networks_found"))
     print("Configured SSID  :", result.get("configured_ssid") or "<none>")
 
@@ -256,16 +240,7 @@ def print_final(result):
     print("SSID detected    :", detected_text)
 
     print("Wi-Fi connected  :", "YES" if result.get("wifi_connected") else "NO")
-    print("IP               :", result.get("wifi_ip") or "-")
-    print("RSSI             :", result.get("wifi_rssi") if result.get("wifi_rssi") is not None else "-")
-
-    server_value = result.get("server_reachable")
-    if server_value is None:
-        server_text = "UNKNOWN"
-    else:
-        server_text = "YES" if server_value else "NO"
-    print("Server reachable :", server_text)
-    print("Server HTTP      :", result.get("server_http_code") if result.get("server_http_code") is not None else "-")
+    print("Server reachable :", "YES" if result.get("server_reachable") else "NO")
     print("----------------------------------------")
     print("RESULT           :", result.get("code"))
     print("MESSAGE          :", result.get("message"))
@@ -304,12 +279,9 @@ def main():
             time.sleep(2)
             ser.reset_input_buffer()
 
-            session = query(
-                ser, "DIAG_BEGIN", timeout=8, expected="DIAG_SESSION"
-            )
+            session = query(ser, "DIAG_BEGIN", timeout=8, expected="DIAG_SESSION")
             if not valid(session) or session.get("status") != "STARTED":
                 print("Unable to start a diagnostic session.")
-                print("This port may not be an ESP32 diagnostic port or the firmware is outdated.")
                 print()
                 continue
 
@@ -318,7 +290,6 @@ def main():
             identify = query(ser, "IDENTIFY", timeout=8, expected="IDENTIFY")
             if not valid(identify):
                 print("No valid IDENTIFY response.")
-                print("This port may not be an ESP32 diagnostic port.")
                 print()
                 continue
 
@@ -328,24 +299,7 @@ def main():
             wifi_scan = query(ser, "WIFI_SCAN", timeout=45, expected="WIFI_SCAN")
             print_result("Wi-Fi scan", wifi_scan)
 
-            if valid(wifi_scan):
-                print()
-                print("Wi-Fi Summary:")
-                print("  Wi-Fi hardware :", wifi_scan.get("wifi_hardware", "UNKNOWN"))
-                print("  Scan status     :", wifi_scan.get("status", "UNKNOWN"))
-                print("  Scan attempts   :", wifi_scan.get("scan_attempts", "?"))
-                print("  Networks found  :", wifi_scan.get("networks_found", 0))
-
-                for network in wifi_scan.get("networks", []):
-                    print(
-                        f"  - {network.get('ssid', '<hidden>')} "
-                        f"(RSSI {network.get('rssi', '?')} dBm, "
-                        f"channel {network.get('channel', '?')})"
-                    )
-
-            wifi_connect = query(
-                ser, "WIFI_CONNECT", timeout=45, expected="WIFI_CONNECT"
-            )
+            wifi_connect = query(ser, "WIFI_CONNECT", timeout=45, expected="WIFI_CONNECT")
             print_result("Wi-Fi connect", wifi_connect)
 
             wifi_status = query(ser, "WIFI_STATUS", timeout=8, expected="WIFI_STATUS")
@@ -376,12 +330,7 @@ def main():
             if ser is not None and ser.is_open:
                 if session_started:
                     try:
-                        query(
-                            ser,
-                            "DIAG_END",
-                            timeout=5,
-                            expected="DIAG_SESSION",
-                        )
+                        query(ser, "DIAG_END", timeout=5, expected="DIAG_SESSION")
                     except (serial.SerialException, OSError):
                         pass
                 ser.close()
