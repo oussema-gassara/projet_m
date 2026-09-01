@@ -50,7 +50,7 @@ router.post("/diagnostic/esp32", (req, res) => {
                 "..",
                 "diagnostic",
                 "esp32",
-                "diagnostic_esp32.py"
+                "diagnostic_by_node.py"
             );
 
             const pythonCommand =
@@ -63,7 +63,7 @@ router.post("/diagnostic/esp32", (req, res) => {
 
             const child = spawn(
                 pythonCommand,
-                [scriptPath, "--node", nodeName],
+                [scriptPath, nodeName],
                 {
                     shell: false,
                     windowsHide: true,
