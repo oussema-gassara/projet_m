@@ -28,6 +28,71 @@
   padding: 10px;
 }
 
+.esp-setup-panel {
+  max-width: 700px;
+  margin: 20px auto;
+  padding: 20px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  text-align: center;
+}
+
+.esp-setup-panel h2 {
+  margin-top: 0;
+}
+
+.esp-setup-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 15px;
+}
+
+.esp-setup-actions button,
+.esp-monitoring-heading button {
+  border: none;
+  border-radius: 7px;
+  padding: 9px 14px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.setup-yes-button {
+  background-color: #22c55e;
+  color: white;
+}
+
+.setup-no-button {
+  background-color: #ef4444;
+  color: white;
+}
+
+.setup-secondary-button {
+  background-color: #e5e7eb;
+  color: #111827;
+}
+
+.esp-setup-steps {
+  max-width: 560px;
+  margin: 15px auto;
+  text-align: left;
+  line-height: 1.7;
+}
+
+.esp-monitoring-heading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+
+.esp-monitoring-heading h1 {
+  margin: 0;
+}
+
 .availability-container {
   display: flex;
   align-items: flex-start;
@@ -42,12 +107,6 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
-}
-
-.setup-hint {
-  margin: 0;
-  font-weight: normal;
-  line-height: 1.4;
 }
 
 .status-disc {
@@ -79,7 +138,9 @@
   color: white;
 }
 
-.diagnostic-button:hover {
+.diagnostic-button:hover,
+.esp-setup-actions button:hover,
+.esp-monitoring-heading button:hover {
   opacity: 0.9;
 }
 
@@ -100,7 +161,6 @@
 }
 
 .rasberry {
-
   gap: 15px;
   border: 1px solid #ccc;
   border-radius: 10px;
@@ -108,14 +168,13 @@
 }
 
 .rasberry-control {
-
   justify-content: space-between;
   align-items: center;
-
   border: 1px solid #ccc;
   border-radius: 10px;
   padding: 10px;
 }
+
 .rasberry-main {
   display: flex;
   justify-content: center;
@@ -125,6 +184,7 @@
   border-radius: 10px;
   margin: 0 5px;
 }
+
 .availability-container-rasberry {
   display: flex;
   align-items: center;
@@ -132,6 +192,7 @@
   font-weight: bold;
   font-size: 13px;
 }
+
 .ai-control {
   border: 1px solid #ccc;
   border-radius: 10px;
