@@ -5,6 +5,7 @@ const metricLabels = {
     cpu_temperature: "Température du processeur",
     external_temperature: "Température externe",
     ram_usage_percent: "Utilisation de la RAM",
+    wifi_signal: "Signal Wi-Fi",
 };
 
 function MetricPrediction({ metricKey, metric }) {
@@ -21,14 +22,36 @@ function MetricPrediction({ metricKey, metric }) {
     const current = Number(metric.current);
     const predicted = Number(metric.predicted_5min);
     const trend = Number(metric.trend_per_minute);
-    const rising = trend > 0;
-
+    const isWifi = metricKey === "wifi_signal";
     const isRam = metricKey === "ram_usage_percent";
-    const dangerLimit = isRam ? 90 : metricKey === "cpu_temperature" ? 80 : 40;
-    const warningLimit = isRam ? 70 : metricKey === "cpu_temperature" ? 60 : 30;
     const unit = metric.unit || "";
-    const predictedDanger = predicted >= dangerLimit;
-    const predictedWarning = predicted >= warningLimit;
+
+    let predictedDanger;
+    let predictedWarning;
+    let trendText;
+    let normalMessage;
+    let warningMessage;
+    let dangerMessage;
+
+    if (isWifi) {
+        // RSSI is inverted compared with temperature/RAM:
+        // a more negative value means a weaker signal.
+        predictedDanger = predicted < -80;
+        predictedWarning = predicted < -65 && !predictedDanger;
+        trendText = trend < 0 ? "Dégradation" : trend > 0 ? "Amélioration" : "Stable";
+        normalMessage = "✓ Le signal Wi-Fi devrait rester dans une zone correcte dans les 5 prochaines minutes.";
+        warningMessage = "⚠ Le signal Wi-Fi risque de devenir faible dans les prochaines minutes.";
+        dangerMessage = "⚠ Le signal Wi-Fi risque de devenir très faible dans les prochaines minutes.";
+    } else {
+        const dangerLimit = isRam ? 90 : metricKey === "cpu_temperature" ? 80 : 40;
+        const warningLimit = isRam ? 70 : metricKey === "cpu_temperature" ? 60 : 30;
+        predictedDanger = predicted >= dangerLimit;
+        predictedWarning = predicted >= warningLimit && !predictedDanger;
+        trendText = trend > 0 ? "Hausse" : "Baisse / stable";
+        normalMessage = "✓ Aucune valeur critique prévue dans les 5 prochaines minutes.";
+        warningMessage = "⚠ La valeur prévue atteint un niveau nécessitant une surveillance.";
+        dangerMessage = "⚠ La valeur prévue atteint un niveau critique dans les prochaines minutes.";
+    }
 
     return (
         <div className="prediction-metric">
@@ -39,7 +62,7 @@ function MetricPrediction({ metricKey, metric }) {
             </p>
 
             <p>
-                Prévue dans 5 min : {" "}
+                Prévue dans 5 min :{" "}
                 <strong className={clsx(
                     predictedDanger
                         ? "metric-danger"
@@ -52,7 +75,7 @@ function MetricPrediction({ metricKey, metric }) {
             </p>
 
             <p>
-                Tendance : <strong>{rising ? "Hausse" : "Baisse / stable"}</strong>
+                Tendance : <strong>{trendText}</strong>
             </p>
 
             <p>
@@ -62,17 +85,11 @@ function MetricPrediction({ metricKey, metric }) {
             <p>Données historiques utilisées : {metric.rows_used}</p>
 
             {predictedDanger ? (
-                <p className="metric-danger">
-                    ⚠ La valeur prévue atteint un niveau critique dans les prochaines minutes.
-                </p>
+                <p className="metric-danger">{dangerMessage}</p>
             ) : predictedWarning ? (
-                <p className="metric-warning">
-                    ⚠ La valeur prévue atteint un niveau nécessitant une surveillance.
-                </p>
+                <p className="metric-warning">{warningMessage}</p>
             ) : (
-                <p className="metric-good">
-                    ✓ Aucune valeur critique prévue dans les 5 prochaines minutes.
-                </p>
+                <p className="metric-good">{normalMessage}</p>
             )}
 
             <h5>Prévisions</h5>
@@ -167,6 +184,11 @@ export default function Prediction({ testMode = false }) {
                             <MetricPrediction
                                 metricKey="ram_usage_percent"
                                 metric={node.forecasts?.ram_usage_percent}
+                            />
+
+                            <MetricPrediction
+                                metricKey="wifi_signal"
+                                metric={node.forecasts?.wifi_signal}
                             />
 
                             <small>Modèle : {node.model}</small>
