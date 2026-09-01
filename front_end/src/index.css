@@ -30,11 +30,24 @@
 
 .availability-container {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   font-weight: bold;
   font-size: 13px;
   flex-wrap: wrap;
+}
+
+.availability-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.setup-hint {
+  margin: 0;
+  font-weight: normal;
+  line-height: 1.4;
 }
 
 .status-disc {
@@ -43,6 +56,7 @@
   border-radius: 50%;
   display: inline-block;
   flex-shrink: 0;
+  margin-top: 3px;
 }
 
 .status-disc.online {
