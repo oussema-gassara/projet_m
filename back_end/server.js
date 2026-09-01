@@ -18,6 +18,7 @@ app.use("/api", require("./routes/dangers"));
 app.use("/api", require("./routes/pi"));
 app.use("/api", require("./routes/security"));
 app.use("/api", require("./routes/ai"));
+app.use("/api", require("./routes/diagnostic"));
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api", require("./routes/nodes"));
 // ======================================================
