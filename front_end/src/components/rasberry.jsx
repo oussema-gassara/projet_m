@@ -47,7 +47,6 @@ export default function Rasberry() {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         node_name: rasberry?.node_name || "raspberry-1",
-                        scenario: "network_error",
                     }),
                 }
             );
