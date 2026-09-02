@@ -1,12 +1,63 @@
 const express = require("express");
+const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 const db = require("../db");
+const requireAuth = require("../middleware/auth");
 
 const router = express.Router();
 const runningDiagnostics = new Set();
 
 const NODE_NAME_PATTERN = /^[A-Za-z0-9_-]{1,50}$/;
+const RASPBERRY_CONFIG_PATH = path.resolve(
+    __dirname,
+    "..",
+    "raspberry-diagnostic-config.json"
+);
+
+function loadRaspberryConfig() {
+    try {
+        if (!fs.existsSync(RASPBERRY_CONFIG_PATH)) {
+            return {};
+        }
+
+        return JSON.parse(
+            fs.readFileSync(RASPBERRY_CONFIG_PATH, "utf8")
+        );
+    } catch (error) {
+        console.error("Unable to read Raspberry diagnostic config:", error);
+        return {};
+    }
+}
+
+function saveRaspberryConfig(config) {
+    fs.writeFileSync(
+        RASPBERRY_CONFIG_PATH,
+        JSON.stringify(config, null, 2),
+        "utf8"
+    );
+}
+
+function isRaspberryConfigComplete(config) {
+    return Boolean(
+        config.ethernet_ip &&
+        config.ssh_user &&
+        config.ssh_key_path &&
+        config.server_host
+    );
+}
+
+function publicRaspberryConfig(config) {
+    return {
+        configured: isRaspberryConfigComplete(config),
+        ethernet_ip: config.ethernet_ip || "",
+        ssh_user: config.ssh_user || "",
+        ssh_port: config.ssh_port || "22",
+        ssh_key_path: config.ssh_key_path || "",
+        server_host: config.server_host || "",
+        server_port: config.server_port || "3000",
+    };
+}
 
 router.post("/diagnostic/esp32", (req, res) => {
     const nodeName = String(req.body?.node_name || "").trim();
@@ -147,12 +198,80 @@ router.post("/diagnostic/esp32", (req, res) => {
     );
 });
 
+router.get(
+    "/diagnostic/raspberry/config",
+    requireAuth,
+    (req, res) => {
+        return res.json(
+            publicRaspberryConfig(loadRaspberryConfig())
+        );
+    }
+);
+
+router.post(
+    "/diagnostic/raspberry/config",
+    requireAuth,
+    (req, res) => {
+        if (req.user?.role !== "admin") {
+            return res.status(403).json({
+                code: "ADMIN_REQUIRED",
+                message: "Seul un administrateur peut configurer le diagnostic Raspberry Pi.",
+            });
+        }
+
+        const config = {
+            ethernet_ip: String(req.body?.ethernet_ip || "").trim(),
+            ssh_user: String(req.body?.ssh_user || "").trim(),
+            ssh_port: String(req.body?.ssh_port || "22").trim() || "22",
+            ssh_key_path: String(req.body?.ssh_key_path || "").trim(),
+            server_host: String(req.body?.server_host || "").trim(),
+            server_port: String(req.body?.server_port || "3000").trim() || "3000",
+        };
+
+        if (!config.ethernet_ip || !config.ssh_user || !config.ssh_key_path || !config.server_host) {
+            return res.status(400).json({
+                code: "RASPBERRY_CONFIG_INCOMPLETE",
+                message: "IP Ethernet, utilisateur SSH, chemin de la clé SSH et adresse du serveur sont requis.",
+            });
+        }
+
+        if (!/^\d{1,5}$/.test(config.ssh_port) || Number(config.ssh_port) > 65535) {
+            return res.status(400).json({
+                code: "INVALID_SSH_PORT",
+                message: "Port SSH invalide.",
+            });
+        }
+
+        if (!/^\d{1,5}$/.test(config.server_port) || Number(config.server_port) > 65535) {
+            return res.status(400).json({
+                code: "INVALID_SERVER_PORT",
+                message: "Port du serveur invalide.",
+            });
+        }
+
+        try {
+            saveRaspberryConfig(config);
+            return res.json({
+                ...publicRaspberryConfig(config),
+                message: "Configuration Raspberry Pi enregistrée.",
+            });
+        } catch (error) {
+            console.error("Unable to save Raspberry diagnostic config:", error);
+            return res.status(500).json({
+                code: "RASPBERRY_CONFIG_SAVE_ERROR",
+                message: "Impossible d'enregistrer la configuration Raspberry Pi.",
+            });
+        }
+    }
+);
+
 function launchRaspberryDiagnostic(
     req,
     res,
     nodeName,
     targetIp,
-    diagnosticMode
+    diagnosticMode,
+    raspberryConfig = {}
 ) {
     const diagnosticKey = `raspberry:${nodeName}`;
 
@@ -195,6 +314,26 @@ function launchRaspberryDiagnostic(
                     diagnosticMode === "simulation"
                         ? "wifi_hardware_error"
                         : "ok",
+                RASPBERRY_SSH_USER:
+                    raspberryConfig.ssh_user ||
+                    process.env.RASPBERRY_SSH_USER ||
+                    "",
+                RASPBERRY_SSH_PORT:
+                    raspberryConfig.ssh_port ||
+                    process.env.RASPBERRY_SSH_PORT ||
+                    "22",
+                RASPBERRY_SSH_KEY:
+                    raspberryConfig.ssh_key_path ||
+                    process.env.RASPBERRY_SSH_KEY ||
+                    "",
+                MONITORING_SERVER_HOST:
+                    raspberryConfig.server_host ||
+                    process.env.MONITORING_SERVER_HOST ||
+                    "",
+                MONITORING_SERVER_PORT:
+                    raspberryConfig.server_port ||
+                    process.env.MONITORING_SERVER_PORT ||
+                    "3000",
             },
         }
     );
@@ -281,18 +420,33 @@ router.post("/diagnostic/raspberry", (req, res) => {
         });
     }
 
-    // The real diagnostic always targets the Ethernet address so Wi-Fi can
-    // be checked independently. Simulation does not need a target address.
-    const ethernetIp = testMode
-        ? ""
-        : String(process.env.RASPBERRY_ETHERNET_IP || "").trim();
+    if (testMode) {
+        return launchRaspberryDiagnostic(
+            req,
+            res,
+            nodeName,
+            "",
+            diagnosticMode,
+            {}
+        );
+    }
+
+    const raspberryConfig = loadRaspberryConfig();
+
+    if (!isRaspberryConfigComplete(raspberryConfig)) {
+        return res.status(400).json({
+            code: "RASPBERRY_CONFIG_MISSING",
+            message: "Configurez d'abord le Raspberry Pi dans l'interface de configuration.",
+        });
+    }
 
     return launchRaspberryDiagnostic(
         req,
         res,
         nodeName,
-        ethernetIp,
-        diagnosticMode
+        raspberryConfig.ethernet_ip,
+        diagnosticMode,
+        raspberryConfig
     );
 });
 
