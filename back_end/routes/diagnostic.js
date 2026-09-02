@@ -268,48 +268,18 @@ router.post("/diagnostic/raspberry", (req, res) => {
         });
     }
 
-    const configuredEthernetIp = String(
+    // The Raspberry diagnostic must use Ethernet so that Wi-Fi can be
+    // diagnosed independently. Never reuse a potentially Wi-Fi-based IP
+    // stored in pi_data here.
+    const ethernetIp = String(
         process.env.RASPBERRY_ETHERNET_IP || ""
     ).trim();
 
-    if (configuredEthernetIp) {
-        return launchRaspberryDiagnostic(
-            req,
-            res,
-            nodeName,
-            configuredEthernetIp
-        );
-    }
-
-    // One Raspberry Pi is currently used in the project. If no dedicated
-    // Ethernet address is configured, use the latest known Pi address as a
-    // fallback. For a reliable Wi-Fi hardware diagnostic, configure
-    // RASPBERRY_ETHERNET_IP with the eth0 address.
-    db.query(
-        `
-        SELECT ip_address
-        FROM pi_data
-        WHERE ip_address IS NOT NULL AND ip_address <> ''
-        ORDER BY id DESC
-        LIMIT 1
-        `,
-        (dbError, rows) => {
-            if (dbError) {
-                console.error("Raspberry diagnostic IP lookup error:", dbError);
-                return launchRaspberryDiagnostic(req, res, nodeName, "");
-            }
-
-            const fallbackIp = rows?.[0]?.ip_address
-                ? String(rows[0].ip_address).trim()
-                : "";
-
-            return launchRaspberryDiagnostic(
-                req,
-                res,
-                nodeName,
-                fallbackIp
-            );
-        }
+    return launchRaspberryDiagnostic(
+        req,
+        res,
+        nodeName,
+        ethernetIp
     );
 });
 
