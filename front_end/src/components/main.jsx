@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import Header from "./header.jsx";
 import EspNodeCard from "./EspNodeCard.jsx";
 import Rasberry from "./rasberry.jsx";
+import RaspberryConfigHelp from "./RaspberryConfigHelp.jsx";
 import Security from "./security.jsx";
 import Ai from "./AiDetection.jsx";
 import Prediction from "./Prediction.jsx";
@@ -243,6 +244,8 @@ export default function Main() {
             <h1 style={{ textAlign: "center", width: "100%" }}>
                 Surveillance des Raspberry Pi
             </h1>
+
+            {!testMode && isAdmin && <RaspberryConfigHelp />}
 
             <div className="rasberry">
                 <Rasberry testMode={testMode} />
