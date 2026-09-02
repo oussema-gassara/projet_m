@@ -248,8 +248,6 @@ export default function Main() {
                 <Rasberry />
             </div>
 
-            {isAdmin && <AddNode nodeType="raspberry" />}
-
             <div className="security">
                 <Security />
             </div>
