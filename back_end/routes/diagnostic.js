@@ -147,7 +147,13 @@ router.post("/diagnostic/esp32", (req, res) => {
     );
 });
 
-function launchRaspberryDiagnostic(req, res, nodeName, targetIp) {
+function launchRaspberryDiagnostic(
+    req,
+    res,
+    nodeName,
+    targetIp,
+    diagnosticMode
+) {
     const diagnosticKey = `raspberry:${nodeName}`;
 
     if (runningDiagnostics.has(diagnosticKey)) {
@@ -184,6 +190,11 @@ function launchRaspberryDiagnostic(req, res, nodeName, targetIp) {
                 ...process.env,
                 PYTHONIOENCODING: "utf-8",
                 PYTHONUTF8: "1",
+                RASPBERRY_DIAGNOSTIC_MODE: diagnosticMode,
+                RASPBERRY_DIAGNOSTIC_SCENARIO:
+                    diagnosticMode === "simulation"
+                        ? "wifi_hardware_error"
+                        : "ok",
             },
         }
     );
@@ -260,6 +271,8 @@ function launchRaspberryDiagnostic(req, res, nodeName, targetIp) {
 
 router.post("/diagnostic/raspberry", (req, res) => {
     const nodeName = String(req.body?.node_name || "raspberry-1").trim();
+    const testMode = req.body?.test_mode === true;
+    const diagnosticMode = testMode ? "simulation" : "real";
 
     if (!NODE_NAME_PATTERN.test(nodeName)) {
         return res.status(400).json({
@@ -268,18 +281,18 @@ router.post("/diagnostic/raspberry", (req, res) => {
         });
     }
 
-    // The Raspberry diagnostic must use Ethernet so that Wi-Fi can be
-    // diagnosed independently. Never reuse a potentially Wi-Fi-based IP
-    // stored in pi_data here.
-    const ethernetIp = String(
-        process.env.RASPBERRY_ETHERNET_IP || ""
-    ).trim();
+    // The real diagnostic always targets the Ethernet address so Wi-Fi can
+    // be checked independently. Simulation does not need a target address.
+    const ethernetIp = testMode
+        ? ""
+        : String(process.env.RASPBERRY_ETHERNET_IP || "").trim();
 
     return launchRaspberryDiagnostic(
         req,
         res,
         nodeName,
-        ethernetIp
+        ethernetIp,
+        diagnosticMode
     );
 });
 
