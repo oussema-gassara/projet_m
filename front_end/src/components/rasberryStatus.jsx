@@ -18,8 +18,19 @@ export default function RasberryStatus({
   const now = new Date();
   const online = lastUpdate ? now - lastUpdate < 10000 : false;
 
-  const checkClass = (value) =>
-    value === "OK" ? "metric-good" : "metric-danger";
+  const checkClass = (value) => {
+    if (value === "OK") return "metric-good";
+    if (value === "WARNING" || value === "DISCONNECTED" || value === "UNKNOWN") {
+      return "metric-warning";
+    }
+    return "metric-danger";
+  };
+
+  const serverLabel = (value) => {
+    if (value === true) return "OK";
+    if (value === false) return "ERROR";
+    return "UNKNOWN";
+  };
 
   return (
     <div className="availability-container-rasberry">
@@ -56,19 +67,63 @@ export default function RasberryStatus({
           }`}
         >
           <strong>{diagnosticResult.message}</strong>
-          <p>Simulation : oui</p>
+
+          <p>
+            Mode : {diagnosticResult.simulation ? "simulation" : "diagnostic SSH réel"}
+          </p>
+
+          {diagnosticResult.target_ip && (
+            <p>IP Ethernet ciblée : {diagnosticResult.target_ip}</p>
+          )}
+
+          <p className={checkClass(diagnosticResult.ssh)}>
+            SSH : {diagnosticResult.ssh || "UNKNOWN"}
+          </p>
+
+          <p className={checkClass(diagnosticResult.ethernet)}>
+            Ethernet : {diagnosticResult.ethernet || "UNKNOWN"}
+          </p>
+
+          <p className={checkClass(diagnosticResult.wifi)}>
+            Wi-Fi : {diagnosticResult.wifi || "UNKNOWN"}
+          </p>
+
           <p className={checkClass(diagnosticResult.cpu)}>
-            CPU : {diagnosticResult.cpu}
+            CPU : {diagnosticResult.cpu || "UNKNOWN"}
+            {diagnosticResult.cpu_temperature != null
+              ? ` (${Number(diagnosticResult.cpu_temperature).toFixed(1)} °C)`
+              : ""}
           </p>
+
           <p className={checkClass(diagnosticResult.ram)}>
-            RAM : {diagnosticResult.ram}
+            RAM : {diagnosticResult.ram || "UNKNOWN"}
+            {diagnosticResult.ram_percent != null
+              ? ` (${Number(diagnosticResult.ram_percent).toFixed(1)} %)`
+              : ""}
           </p>
+
           <p className={checkClass(diagnosticResult.disk)}>
-            Disque : {diagnosticResult.disk}
+            Disque : {diagnosticResult.disk || "UNKNOWN"}
+            {diagnosticResult.disk_percent != null
+              ? ` (${Number(diagnosticResult.disk_percent).toFixed(1)} %)`
+              : ""}
           </p>
-          <p className={checkClass(diagnosticResult.network)}>
-            Réseau : {diagnosticResult.network}
+
+          <p className={checkClass(serverLabel(diagnosticResult.server_reachable))}>
+            Serveur : {serverLabel(diagnosticResult.server_reachable)}
           </p>
+
+          {diagnosticResult.wifi === "HARDWARE_ERROR" && (
+            <p className="metric-danger">
+              L&apos;interface wlan0 est absente. Elle peut être désactivée ou présenter une défaillance matérielle.
+            </p>
+          )}
+
+          {diagnosticResult.wifi === "DISCONNECTED" && (
+            <p className="metric-warning">
+              L&apos;interface Wi-Fi existe mais elle n&apos;est pas connectée. Le diagnostic continue via Ethernet.
+            </p>
+          )}
         </div>
       )}
     </div>
