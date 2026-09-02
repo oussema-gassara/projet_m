@@ -78,7 +78,6 @@ export default function Rasberry({ testMode = false }) {
                     server_port: data.server_port || "3000",
                 });
                 setConfigConfigured(Boolean(data.configured));
-                setShowConfigForm(!data.configured);
             })
             .catch((error) => {
                 console.error(error);
@@ -186,33 +185,50 @@ export default function Rasberry({ testMode = false }) {
                         marginBottom: "15px",
                     }}
                 >
-                    <h2>Configuration du diagnostic Raspberry Pi</h2>
+                    <div
+                        style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: "10px",
+                            flexWrap: "wrap",
+                        }}
+                    >
+                        <h2 style={{ margin: 0 }}>
+                            Configuration du diagnostic Raspberry Pi
+                        </h2>
 
-                    {configConfigured && !showConfigForm && (
-                        <>
-                            <p className="metric-good">
-                                Configuration SSH / Ethernet enregistrée.
-                            </p>
-                            <p>IP Ethernet : {diagnosticConfig.ethernet_ip}</p>
-                            <p>Utilisateur SSH : {diagnosticConfig.ssh_user}</p>
-                            <p>Port SSH : {diagnosticConfig.ssh_port}</p>
-                            <p>Serveur : {diagnosticConfig.server_host}:{diagnosticConfig.server_port}</p>
-                            <button
-                                type="button"
-                                className="setup-secondary-button"
-                                onClick={() => {
-                                    setShowConfigForm(true);
-                                    setConfigMessage("");
-                                    setConfigError("");
-                                }}
-                            >
-                                Modifier la configuration
-                            </button>
-                        </>
+                        <button
+                            type="button"
+                            className="setup-secondary-button"
+                            onClick={() => {
+                                setShowConfigForm((current) => !current);
+                                setConfigMessage("");
+                                setConfigError("");
+                            }}
+                            style={{
+                                borderRadius: "10px",
+                                padding: "8px 14px",
+                                cursor: "pointer",
+                                fontWeight: "bold",
+                            }}
+                        >
+                            {showConfigForm
+                                ? "Masquer la configuration"
+                                : "Afficher la configuration"}
+                        </button>
+                    </div>
+
+                    {!showConfigForm && (
+                        <p className={configConfigured ? "metric-good" : "metric-warning"}>
+                            {configConfigured
+                                ? "Configuration SSH / Ethernet enregistrée."
+                                : "Configuration SSH / Ethernet non enregistrée."}
+                        </p>
                     )}
 
                     {showConfigForm && (
-                        <form onSubmit={handleSaveDiagnosticConfig}>
+                        <form onSubmit={handleSaveDiagnosticConfig} style={{ marginTop: "15px" }}>
                             <p>
                                 Ces informations servent uniquement au diagnostic SSH via Ethernet.
                             </p>
@@ -226,7 +242,7 @@ export default function Rasberry({ testMode = false }) {
                                     onChange={handleConfigChange}
                                     placeholder="192.168.1.25"
                                     required
-                                    style={{ display: "block", width: "100%", margin: "5px 0 12px" }}
+                                    style={{ display: "block", width: "100%", margin: "5px 0 12px", borderRadius: "10px" }}
                                 />
                             </label>
 
@@ -239,7 +255,7 @@ export default function Rasberry({ testMode = false }) {
                                     onChange={handleConfigChange}
                                     placeholder="pi"
                                     required
-                                    style={{ display: "block", width: "100%", margin: "5px 0 12px" }}
+                                    style={{ display: "block", width: "100%", margin: "5px 0 12px", borderRadius: "10px" }}
                                 />
                             </label>
 
@@ -253,7 +269,7 @@ export default function Rasberry({ testMode = false }) {
                                     min="1"
                                     max="65535"
                                     required
-                                    style={{ display: "block", width: "100%", margin: "5px 0 12px" }}
+                                    style={{ display: "block", width: "100%", margin: "5px 0 12px", borderRadius: "10px" }}
                                 />
                             </label>
 
@@ -266,7 +282,7 @@ export default function Rasberry({ testMode = false }) {
                                     onChange={handleConfigChange}
                                     placeholder="C:/Users/VotreNom/.ssh/id_ed25519"
                                     required
-                                    style={{ display: "block", width: "100%", margin: "5px 0 12px" }}
+                                    style={{ display: "block", width: "100%", margin: "5px 0 12px", borderRadius: "10px" }}
                                 />
                             </label>
 
@@ -279,7 +295,7 @@ export default function Rasberry({ testMode = false }) {
                                     onChange={handleConfigChange}
                                     placeholder="192.168.1.10"
                                     required
-                                    style={{ display: "block", width: "100%", margin: "5px 0 12px" }}
+                                    style={{ display: "block", width: "100%", margin: "5px 0 12px", borderRadius: "10px" }}
                                 />
                             </label>
 
@@ -293,7 +309,7 @@ export default function Rasberry({ testMode = false }) {
                                     min="1"
                                     max="65535"
                                     required
-                                    style={{ display: "block", width: "100%", margin: "5px 0 12px" }}
+                                    style={{ display: "block", width: "100%", margin: "5px 0 12px", borderRadius: "10px" }}
                                 />
                             </label>
 
@@ -301,20 +317,10 @@ export default function Rasberry({ testMode = false }) {
                                 type="submit"
                                 className="setup-yes-button"
                                 disabled={configLoading}
+                                style={{ borderRadius: "10px" }}
                             >
                                 {configLoading ? "Enregistrement..." : "Enregistrer la configuration"}
                             </button>
-
-                            {configConfigured && (
-                                <button
-                                    type="button"
-                                    className="setup-secondary-button"
-                                    onClick={() => setShowConfigForm(false)}
-                                    style={{ marginLeft: "8px" }}
-                                >
-                                    Annuler
-                                </button>
-                            )}
                         </form>
                     )}
 
