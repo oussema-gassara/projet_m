@@ -245,7 +245,7 @@ export default function Main() {
             </h1>
 
             <div className="rasberry">
-                <Rasberry />
+                <Rasberry testMode={testMode} />
             </div>
 
             <div className="security">
