@@ -88,27 +88,6 @@ export default function RasberryStatus({
             Wi-Fi : {diagnosticResult.wifi || "UNKNOWN"}
           </p>
 
-          <p className={checkClass(diagnosticResult.cpu)}>
-            CPU : {diagnosticResult.cpu || "UNKNOWN"}
-            {diagnosticResult.cpu_temperature != null
-              ? ` (${Number(diagnosticResult.cpu_temperature).toFixed(1)} °C)`
-              : ""}
-          </p>
-
-          <p className={checkClass(diagnosticResult.ram)}>
-            RAM : {diagnosticResult.ram || "UNKNOWN"}
-            {diagnosticResult.ram_percent != null
-              ? ` (${Number(diagnosticResult.ram_percent).toFixed(1)} %)`
-              : ""}
-          </p>
-
-          <p className={checkClass(diagnosticResult.disk)}>
-            Disque : {diagnosticResult.disk || "UNKNOWN"}
-            {diagnosticResult.disk_percent != null
-              ? ` (${Number(diagnosticResult.disk_percent).toFixed(1)} %)`
-              : ""}
-          </p>
-
           <p className={checkClass(serverLabel(diagnosticResult.server_reachable))}>
             Serveur : {serverLabel(diagnosticResult.server_reachable)}
           </p>
