@@ -241,16 +241,6 @@ export default function Main() {
                 </>
             )}
 
-            <h1 style={{ textAlign: "center", width: "100%" }}>
-                Surveillance des Raspberry Pi
-            </h1>
-
-            {!testMode && isAdmin && <RaspberryConfigHelp />}
-
-            <div className="rasberry">
-                <Rasberry testMode={testMode} />
-            </div>
-
             <div className="security">
                 <Security />
             </div>
@@ -271,6 +261,16 @@ export default function Main() {
                     testMode={testMode}
                     testNodes={espNodes}
                 />
+            </div>
+
+            <h1 style={{ textAlign: "center", width: "100%" }}>
+                Surveillance des Raspberry Pi
+            </h1>
+
+            {!testMode && isAdmin && <RaspberryConfigHelp />}
+
+            <div className="rasberry">
+                <Rasberry testMode={testMode} />
             </div>
         </>
     );
