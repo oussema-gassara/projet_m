@@ -241,10 +241,6 @@ export default function Main() {
                 </>
             )}
 
-            <div className="security">
-                <Security />
-            </div>
-
             <div className="danger">
                 <DangerControl />
             </div>
@@ -271,6 +267,10 @@ export default function Main() {
 
             <div className="rasberry">
                 <Rasberry testMode={testMode} />
+            </div>
+
+            <div className="security">
+                <Security />
             </div>
         </>
     );
