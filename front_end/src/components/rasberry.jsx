@@ -2,12 +2,30 @@ import { useState, useEffect } from "react";
 import RasberryStatus from "./rasberryStatus.jsx";
 import clsx from "clsx";
 
+const emptyDiagnosticConfig = {
+    ethernet_ip: "",
+    ssh_user: "",
+    ssh_port: "22",
+    ssh_key_path: "",
+    server_host: "",
+    server_port: "3000",
+};
+
 export default function Rasberry({ testMode = false }) {
 
     const [rasberry, setRasberry] = useState(null);
     const [diagnosticLoading, setDiagnosticLoading] = useState(false);
     const [diagnosticResult, setDiagnosticResult] = useState(null);
     const [diagnosticError, setDiagnosticError] = useState("");
+
+    const [diagnosticConfig, setDiagnosticConfig] = useState(emptyDiagnosticConfig);
+    const [configConfigured, setConfigConfigured] = useState(false);
+    const [showConfigForm, setShowConfigForm] = useState(false);
+    const [configLoading, setConfigLoading] = useState(false);
+    const [configMessage, setConfigMessage] = useState("");
+    const [configError, setConfigError] = useState("");
+
+    const isAdmin = localStorage.getItem("role") === "admin";
 
     useEffect(() => {
 
@@ -31,6 +49,92 @@ export default function Rasberry({ testMode = false }) {
         return () => clearInterval(interval);
 
     }, []);
+
+    useEffect(() => {
+        if (testMode || !isAdmin) return;
+
+        const token = localStorage.getItem("token");
+        if (!token) return;
+
+        fetch("http://localhost:3000/api/diagnostic/raspberry/config", {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+        })
+            .then(async (response) => {
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.message || data.error || "Impossible de charger la configuration Raspberry Pi.");
+                }
+                return data;
+            })
+            .then((data) => {
+                setDiagnosticConfig({
+                    ethernet_ip: data.ethernet_ip || "",
+                    ssh_user: data.ssh_user || "",
+                    ssh_port: data.ssh_port || "22",
+                    ssh_key_path: data.ssh_key_path || "",
+                    server_host: data.server_host || "",
+                    server_port: data.server_port || "3000",
+                });
+                setConfigConfigured(Boolean(data.configured));
+                setShowConfigForm(!data.configured);
+            })
+            .catch((error) => {
+                console.error(error);
+                setConfigError(error.message);
+            });
+    }, [testMode, isAdmin]);
+
+    const handleConfigChange = (event) => {
+        const { name, value } = event.target;
+        setDiagnosticConfig((current) => ({
+            ...current,
+            [name]: value,
+        }));
+    };
+
+    const handleSaveDiagnosticConfig = async (event) => {
+        event.preventDefault();
+        if (configLoading) return;
+
+        setConfigLoading(true);
+        setConfigMessage("");
+        setConfigError("");
+
+        try {
+            const token = localStorage.getItem("token");
+
+            const response = await fetch(
+                "http://localhost:3000/api/diagnostic/raspberry/config",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify(diagnosticConfig),
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    data.message || data.error || "Impossible d'enregistrer la configuration Raspberry Pi."
+                );
+            }
+
+            setConfigConfigured(true);
+            setShowConfigForm(false);
+            setConfigMessage("Configuration Raspberry Pi enregistrée.");
+        } catch (error) {
+            console.error(error);
+            setConfigError(error.message);
+        } finally {
+            setConfigLoading(false);
+        }
+    };
 
     const handleDiagnostic = async () => {
         if (diagnosticLoading) return;
@@ -72,122 +176,275 @@ export default function Rasberry({ testMode = false }) {
     };
 
     return (
-        <div className="rasberry-main">
-            <div className="rasberry-status">
-                <RasberryStatus
-                    rasberry={rasberry}
-                    onDiagnostic={handleDiagnostic}
-                    diagnosticLoading={diagnosticLoading}
-                    diagnosticResult={diagnosticResult}
-                    diagnosticError={diagnosticError}
-                />
-            </div>
-            <div className="rasberry-control">
-                <h2>Rasberry Pi Control</h2>
-                <hr />
+        <>
+            {!testMode && isAdmin && (
+                <section
+                    style={{
+                        border: "1px solid #ccc",
+                        borderRadius: "10px",
+                        padding: "15px",
+                        marginBottom: "15px",
+                    }}
+                >
+                    <h2>Configuration du diagnostic Raspberry Pi</h2>
 
-                {!rasberry ? (
-                    <p>Loading rasberry data...</p>
-                ) : (
-                    <>
-                        {rasberry.ip_address && (
-                            <>
-                                <p>Adresse Ip: {rasberry.ip_address}</p>
-                                <hr />
-                            </>
-                        )}
-                        {rasberry.mac_address && (
-                            <>
-                                <p>Adresse Mac: {rasberry.mac_address}</p>
-                                <hr />
-                            </>
-                        )}
-                        <p>
-                            Statut Wi-Fi: {rasberry.wifi_status}
-                        </p>
-                        <hr />
-                        <p>
-                            Temperature Du Processeur:{" "}
-                            <span
-                                className={clsx("metric-value", {
-                                    "metric-good": rasberry.cpu_temperature < 60,
-                                    "metric-warning": rasberry.cpu_temperature >= 60 && rasberry.cpu_temperature <= 80,
-                                    "metric-danger": rasberry.cpu_temperature > 80,
-                                })}
+                    {configConfigured && !showConfigForm && (
+                        <>
+                            <p className="metric-good">
+                                Configuration SSH / Ethernet enregistrée.
+                            </p>
+                            <p>IP Ethernet : {diagnosticConfig.ethernet_ip}</p>
+                            <p>Utilisateur SSH : {diagnosticConfig.ssh_user}</p>
+                            <p>Port SSH : {diagnosticConfig.ssh_port}</p>
+                            <p>Serveur : {diagnosticConfig.server_host}:{diagnosticConfig.server_port}</p>
+                            <button
+                                type="button"
+                                className="setup-secondary-button"
+                                onClick={() => {
+                                    setShowConfigForm(true);
+                                    setConfigMessage("");
+                                    setConfigError("");
+                                }}
                             >
-                                {Number(rasberry.cpu_temperature).toFixed(2)}°C
-                            </span>
-                        </p>
-                        <hr />
-                        <p>
-                            Utilisation Du Processeur:{" "}
-                            {Number(rasberry.cpu_usage_percent).toFixed(1)}%
-                        </p>
-                        <hr />
-                        <p>
-                            RAM Totale:{" "}
-                            {(rasberry.total_ram / 1024 / 1024).toFixed(2)} MB
-                        </p>
-                        <hr />
-                        <p>
-                            RAM Libre:{" "}
-                            {(rasberry.free_ram / 1024 / 1024).toFixed(2)} MB
-                        </p>
-                        <hr />
-                        <p>
-                            RAM Utilisée:{" "}
-                            {(rasberry.used_ram / 1024 / 1024).toFixed(2)} MB
-                        </p>
-                        <hr />
-                        <p>
-                            Utilisation de Ram:{" "}
-                            <span
-                                className={clsx("metric-value", {
-                                    "metric-good": rasberry.used_ram_percent < 70,
-                                    "metric-warning": rasberry.used_ram_percent >= 70 && rasberry.used_ram_percent <= 90,
-                                    "metric-danger": rasberry.used_ram_percent > 90,
-                                })}
+                                Modifier la configuration
+                            </button>
+                        </>
+                    )}
+
+                    {showConfigForm && (
+                        <form onSubmit={handleSaveDiagnosticConfig}>
+                            <p>
+                                Ces informations servent uniquement au diagnostic SSH via Ethernet.
+                            </p>
+
+                            <label>
+                                IP Ethernet du Raspberry Pi
+                                <input
+                                    type="text"
+                                    name="ethernet_ip"
+                                    value={diagnosticConfig.ethernet_ip}
+                                    onChange={handleConfigChange}
+                                    placeholder="192.168.1.25"
+                                    required
+                                    style={{ display: "block", width: "100%", margin: "5px 0 12px" }}
+                                />
+                            </label>
+
+                            <label>
+                                Utilisateur SSH
+                                <input
+                                    type="text"
+                                    name="ssh_user"
+                                    value={diagnosticConfig.ssh_user}
+                                    onChange={handleConfigChange}
+                                    placeholder="pi"
+                                    required
+                                    style={{ display: "block", width: "100%", margin: "5px 0 12px" }}
+                                />
+                            </label>
+
+                            <label>
+                                Port SSH
+                                <input
+                                    type="number"
+                                    name="ssh_port"
+                                    value={diagnosticConfig.ssh_port}
+                                    onChange={handleConfigChange}
+                                    min="1"
+                                    max="65535"
+                                    required
+                                    style={{ display: "block", width: "100%", margin: "5px 0 12px" }}
+                                />
+                            </label>
+
+                            <label>
+                                Chemin de la clé SSH privée sur le PC
+                                <input
+                                    type="text"
+                                    name="ssh_key_path"
+                                    value={diagnosticConfig.ssh_key_path}
+                                    onChange={handleConfigChange}
+                                    placeholder="C:/Users/VotreNom/.ssh/id_ed25519"
+                                    required
+                                    style={{ display: "block", width: "100%", margin: "5px 0 12px" }}
+                                />
+                            </label>
+
+                            <label>
+                                Adresse IP du PC / serveur de monitoring
+                                <input
+                                    type="text"
+                                    name="server_host"
+                                    value={diagnosticConfig.server_host}
+                                    onChange={handleConfigChange}
+                                    placeholder="192.168.1.10"
+                                    required
+                                    style={{ display: "block", width: "100%", margin: "5px 0 12px" }}
+                                />
+                            </label>
+
+                            <label>
+                                Port du serveur
+                                <input
+                                    type="number"
+                                    name="server_port"
+                                    value={diagnosticConfig.server_port}
+                                    onChange={handleConfigChange}
+                                    min="1"
+                                    max="65535"
+                                    required
+                                    style={{ display: "block", width: "100%", margin: "5px 0 12px" }}
+                                />
+                            </label>
+
+                            <button
+                                type="submit"
+                                className="setup-yes-button"
+                                disabled={configLoading}
                             >
-                                {Number(rasberry.used_ram_percent).toFixed(1)}%
-                            </span>
-                        </p>
-                        <hr />
-                        <p>
-                            Disque Total:{" "}
-                            {(rasberry.disk_total / 1024 / 1024 / 1024).toFixed(2)} GB
-                        </p>
-                        <hr />
-                        <p>
-                            Disque Utilisé:{" "}
-                            {(rasberry.disk_used / 1024 / 1024 / 1024).toFixed(2)} GB
-                        </p>
-                        <hr />
-                        <p>
-                            Disque Libre:{" "}
-                            {(rasberry.disk_free / 1024 / 1024 / 1024).toFixed(2)} GB
-                        </p>
-                        <hr />
-                        <p>
-                            Utilisation du Disque:{" "}
-                            <span
-                                className={clsx("metric-value", {
-                                    "metric-good": rasberry.disk_percent < 70,
-                                    "metric-warning": rasberry.disk_percent >= 70 && rasberry.disk_percent <= 90,
-                                    "metric-danger": rasberry.disk_percent > 90,
-                                })}
-                            >
-                                {Number(rasberry.disk_percent).toFixed(1)}%
-                            </span>
-                        </p>
-                        <hr />
-                        <p>
-                            Temps de Fonctionnement:{" "}
-                            {Math.floor(Number(rasberry.uptime) / 3600)}h{" "}
-                            {Math.floor((Number(rasberry.uptime) % 3600) / 60)}m
-                        </p>
-                    </>
-                )}
+                                {configLoading ? "Enregistrement..." : "Enregistrer la configuration"}
+                            </button>
+
+                            {configConfigured && (
+                                <button
+                                    type="button"
+                                    className="setup-secondary-button"
+                                    onClick={() => setShowConfigForm(false)}
+                                    style={{ marginLeft: "8px" }}
+                                >
+                                    Annuler
+                                </button>
+                            )}
+                        </form>
+                    )}
+
+                    {configMessage && (
+                        <p className="metric-good">{configMessage}</p>
+                    )}
+
+                    {configError && (
+                        <p className="metric-danger">{configError}</p>
+                    )}
+                </section>
+            )}
+
+            <div className="rasberry-main">
+                <div className="rasberry-status">
+                    <RasberryStatus
+                        rasberry={rasberry}
+                        onDiagnostic={handleDiagnostic}
+                        diagnosticLoading={diagnosticLoading}
+                        diagnosticResult={diagnosticResult}
+                        diagnosticError={diagnosticError}
+                    />
+                </div>
+                <div className="rasberry-control">
+                    <h2>Rasberry Pi Control</h2>
+                    <hr />
+
+                    {!rasberry ? (
+                        <p>Loading rasberry data...</p>
+                    ) : (
+                        <>
+                            {rasberry.ip_address && (
+                                <>
+                                    <p>Adresse Ip: {rasberry.ip_address}</p>
+                                    <hr />
+                                </>
+                            )}
+                            {rasberry.mac_address && (
+                                <>
+                                    <p>Adresse Mac: {rasberry.mac_address}</p>
+                                    <hr />
+                                </>
+                            )}
+                            <p>
+                                Statut Wi-Fi: {rasberry.wifi_status}
+                            </p>
+                            <hr />
+                            <p>
+                                Temperature Du Processeur:{" "}
+                                <span
+                                    className={clsx("metric-value", {
+                                        "metric-good": rasberry.cpu_temperature < 60,
+                                        "metric-warning": rasberry.cpu_temperature >= 60 && rasberry.cpu_temperature <= 80,
+                                        "metric-danger": rasberry.cpu_temperature > 80,
+                                    })}
+                                >
+                                    {Number(rasberry.cpu_temperature).toFixed(2)}°C
+                                </span>
+                            </p>
+                            <hr />
+                            <p>
+                                Utilisation Du Processeur:{" "}
+                                {Number(rasberry.cpu_usage_percent).toFixed(1)}%
+                            </p>
+                            <hr />
+                            <p>
+                                RAM Totale:{" "}
+                                {(rasberry.total_ram / 1024 / 1024).toFixed(2)} MB
+                            </p>
+                            <hr />
+                            <p>
+                                RAM Libre:{" "}
+                                {(rasberry.free_ram / 1024 / 1024).toFixed(2)} MB
+                            </p>
+                            <hr />
+                            <p>
+                                RAM Utilisée:{" "}
+                                {(rasberry.used_ram / 1024 / 1024).toFixed(2)} MB
+                            </p>
+                            <hr />
+                            <p>
+                                Utilisation de Ram:{" "}
+                                <span
+                                    className={clsx("metric-value", {
+                                        "metric-good": rasberry.used_ram_percent < 70,
+                                        "metric-warning": rasberry.used_ram_percent >= 70 && rasberry.used_ram_percent <= 90,
+                                        "metric-danger": rasberry.used_ram_percent > 90,
+                                    })}
+                                >
+                                    {Number(rasberry.used_ram_percent).toFixed(1)}%
+                                </span>
+                            </p>
+                            <hr />
+                            <p>
+                                Disque Total:{" "}
+                                {(rasberry.disk_total / 1024 / 1024 / 1024).toFixed(2)} GB
+                            </p>
+                            <hr />
+                            <p>
+                                Disque Utilisé:{" "}
+                                {(rasberry.disk_used / 1024 / 1024 / 1024).toFixed(2)} GB
+                            </p>
+                            <hr />
+                            <p>
+                                Disque Libre:{" "}
+                                {(rasberry.disk_free / 1024 / 1024 / 1024).toFixed(2)} GB
+                            </p>
+                            <hr />
+                            <p>
+                                Utilisation du Disque:{" "}
+                                <span
+                                    className={clsx("metric-value", {
+                                        "metric-good": rasberry.disk_percent < 70,
+                                        "metric-warning": rasberry.disk_percent >= 70 && rasberry.disk_percent <= 90,
+                                        "metric-danger": rasberry.disk_percent > 90,
+                                    })}
+                                >
+                                    {Number(rasberry.disk_percent).toFixed(1)}%
+                                </span>
+                            </p>
+                            <hr />
+                            <p>
+                                Temps de Fonctionnement:{" "}
+                                {Math.floor(Number(rasberry.uptime) / 3600)}h{" "}
+                                {Math.floor((Number(rasberry.uptime) % 3600) / 60)}m
+                            </p>
+                        </>
+                    )}
+                </div>
             </div>
-        </div>
+        </>
     );
 }
