@@ -147,32 +147,9 @@ router.post("/diagnostic/esp32", (req, res) => {
     );
 });
 
-router.post("/diagnostic/raspberry", (req, res) => {
-    const nodeName = String(req.body?.node_name || "raspberry-1").trim();
-    const scenario = String(req.body?.scenario || "network_error").trim();
-    const allowedScenarios = new Set([
-        "ok",
-        "network_error",
-        "cpu_error",
-        "ram_error",
-        "disk_error",
-    ]);
-
-    if (!NODE_NAME_PATTERN.test(nodeName)) {
-        return res.status(400).json({
-            code: "INVALID_NODE_NAME",
-            message: "Nom du Raspberry Pi invalide.",
-        });
-    }
-
-    if (!allowedScenarios.has(scenario)) {
-        return res.status(400).json({
-            code: "INVALID_DIAGNOSTIC_SCENARIO",
-            message: "Scénario de diagnostic Raspberry Pi invalide.",
-        });
-    }
-
+function launchRaspberryDiagnostic(req, res, nodeName, targetIp) {
     const diagnosticKey = `raspberry:${nodeName}`;
+
     if (runningDiagnostics.has(diagnosticKey)) {
         return res.status(409).json({
             code: "DIAGNOSTIC_ALREADY_RUNNING",
@@ -199,7 +176,7 @@ router.post("/diagnostic/raspberry", (req, res) => {
 
     const child = spawn(
         pythonCommand,
-        [scriptPath, nodeName, scenario],
+        [scriptPath, nodeName, targetIp || ""],
         {
             shell: false,
             windowsHide: true,
@@ -279,6 +256,61 @@ router.post("/diagnostic/raspberry", (req, res) => {
             });
         }
     });
+}
+
+router.post("/diagnostic/raspberry", (req, res) => {
+    const nodeName = String(req.body?.node_name || "raspberry-1").trim();
+
+    if (!NODE_NAME_PATTERN.test(nodeName)) {
+        return res.status(400).json({
+            code: "INVALID_NODE_NAME",
+            message: "Nom du Raspberry Pi invalide.",
+        });
+    }
+
+    const configuredEthernetIp = String(
+        process.env.RASPBERRY_ETHERNET_IP || ""
+    ).trim();
+
+    if (configuredEthernetIp) {
+        return launchRaspberryDiagnostic(
+            req,
+            res,
+            nodeName,
+            configuredEthernetIp
+        );
+    }
+
+    // One Raspberry Pi is currently used in the project. If no dedicated
+    // Ethernet address is configured, use the latest known Pi address as a
+    // fallback. For a reliable Wi-Fi hardware diagnostic, configure
+    // RASPBERRY_ETHERNET_IP with the eth0 address.
+    db.query(
+        `
+        SELECT ip_address
+        FROM pi_data
+        WHERE ip_address IS NOT NULL AND ip_address <> ''
+        ORDER BY id DESC
+        LIMIT 1
+        `,
+        (dbError, rows) => {
+            if (dbError) {
+                console.error("Raspberry diagnostic IP lookup error:", dbError);
+                return launchRaspberryDiagnostic(req, res, nodeName, "");
+            }
+
+            const fallbackIp = rows?.[0]?.ip_address
+                ? String(rows[0].ip_address).trim()
+                : "";
+
+            return launchRaspberryDiagnostic(
+                req,
+                res,
+                nodeName,
+                fallbackIp
+            );
+        }
+    );
 });
 
 module.exports = router;
