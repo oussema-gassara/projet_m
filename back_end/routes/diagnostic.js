@@ -147,4 +147,153 @@ router.post("/diagnostic/esp32", (req, res) => {
     );
 });
 
+function launchRaspberryDiagnostic(
+    req,
+    res,
+    nodeName,
+    targetIp,
+    diagnosticMode
+) {
+    const diagnosticKey = `raspberry:${nodeName}`;
+
+    if (runningDiagnostics.has(diagnosticKey)) {
+        return res.status(409).json({
+            code: "DIAGNOSTIC_ALREADY_RUNNING",
+            message: "Un diagnostic est déjà en cours pour ce Raspberry Pi.",
+        });
+    }
+
+    const scriptPath = path.resolve(
+        __dirname,
+        "..",
+        "..",
+        "diagnostic",
+        "raspberry",
+        "diagnostic_raspberry.py"
+    );
+
+    const pythonCommand =
+        process.env.PYTHON_PATH ||
+        (process.platform === "win32"
+            ? "C:\\Python314\\python.exe"
+            : "python3");
+
+    runningDiagnostics.add(diagnosticKey);
+
+    const child = spawn(
+        pythonCommand,
+        [scriptPath, nodeName, targetIp || ""],
+        {
+            shell: false,
+            windowsHide: true,
+            env: {
+                ...process.env,
+                PYTHONIOENCODING: "utf-8",
+                PYTHONUTF8: "1",
+                RASPBERRY_DIAGNOSTIC_MODE: diagnosticMode,
+                RASPBERRY_DIAGNOSTIC_SCENARIO:
+                    diagnosticMode === "simulation"
+                        ? "wifi_hardware_error"
+                        : "ok",
+            },
+        }
+    );
+
+    let stdout = "";
+    let stderr = "";
+    let finished = false;
+
+    const cleanup = () => {
+        runningDiagnostics.delete(diagnosticKey);
+    };
+
+    const timeout = setTimeout(() => {
+        if (finished) return;
+        child.kill();
+    }, 30000);
+
+    child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString("utf8");
+    });
+
+    child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString("utf8");
+    });
+
+    child.on("error", (error) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeout);
+        cleanup();
+
+        console.error("Unable to start Raspberry diagnostic:", error);
+        return res.status(500).json({
+            code: "DIAGNOSTIC_START_ERROR",
+            message: "Impossible de démarrer le diagnostic Raspberry Pi.",
+        });
+    });
+
+    child.on("close", () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeout);
+        cleanup();
+
+        const finalLine = stdout
+            .split(/\r?\n/)
+            .reverse()
+            .find((line) => line.startsWith("FINAL_RESULT_JSON="));
+
+        if (!finalLine) {
+            console.error("Raspberry diagnostic did not return JSON.");
+            if (stderr) console.error(stderr);
+
+            return res.status(500).json({
+                code: "DIAGNOSTIC_NO_RESULT",
+                message: "Le diagnostic Raspberry Pi n'a pas retourné de résultat.",
+            });
+        }
+
+        try {
+            const result = JSON.parse(
+                finalLine.slice("FINAL_RESULT_JSON=".length)
+            );
+            return res.json(result);
+        } catch (parseError) {
+            console.error("Invalid Raspberry diagnostic JSON:", parseError);
+            return res.status(500).json({
+                code: "DIAGNOSTIC_INVALID_RESULT",
+                message: "Le résultat du diagnostic Raspberry Pi est invalide.",
+            });
+        }
+    });
+}
+
+router.post("/diagnostic/raspberry", (req, res) => {
+    const nodeName = String(req.body?.node_name || "raspberry-1").trim();
+    const testMode = req.body?.test_mode === true;
+    const diagnosticMode = testMode ? "simulation" : "real";
+
+    if (!NODE_NAME_PATTERN.test(nodeName)) {
+        return res.status(400).json({
+            code: "INVALID_NODE_NAME",
+            message: "Nom du Raspberry Pi invalide.",
+        });
+    }
+
+    // The real diagnostic always targets the Ethernet address so Wi-Fi can
+    // be checked independently. Simulation does not need a target address.
+    const ethernetIp = testMode
+        ? ""
+        : String(process.env.RASPBERRY_ETHERNET_IP || "").trim();
+
+    return launchRaspberryDiagnostic(
+        req,
+        res,
+        nodeName,
+        ethernetIp,
+        diagnosticMode
+    );
+});
+
 module.exports = router;
