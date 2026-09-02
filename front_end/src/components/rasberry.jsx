@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import RasberryStatus from "./rasberryStatus.jsx";
 import clsx from "clsx";
 
-export default function Rasberry() {
+export default function Rasberry({ testMode = false }) {
 
     const [rasberry, setRasberry] = useState(null);
     const [diagnosticLoading, setDiagnosticLoading] = useState(false);
@@ -47,6 +47,7 @@ export default function Rasberry() {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         node_name: rasberry?.node_name || "raspberry-1",
+                        test_mode: testMode,
                     }),
                 }
             );
