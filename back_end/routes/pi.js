@@ -8,7 +8,6 @@ console.log("✅ Pi route loaded");
 
 router.post("/pi/data", (req, res) => {
     console.log("📩 PI DATA RECEIVED");
-    console.log(req.body);
     const data = req.body;
 
     const sql = `
@@ -16,6 +15,7 @@ router.post("/pi/data", (req, res) => {
     INSERT INTO pi_data
     (
 
+    node_name,
     hostname,
     ip_address,
     mac_address,
@@ -40,11 +40,12 @@ router.post("/pi/data", (req, res) => {
     )
 
     VALUES
-    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 
     `;
 
     const values = [
+        data.node_name || "raspberry-1",
         data.hostname,
         data.ip_address,
         data.mac_address,
