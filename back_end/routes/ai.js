@@ -1,4 +1,6 @@
 const express = require("express");
+const path = require("path");
+const { spawn } = require("child_process");
 const db = require("../db");
 
 const router = express.Router();
@@ -180,6 +182,85 @@ router.post("/ai/detect-test", async (req, res) => {
         console.error(err);
         res.status(500).json({ error: "AI service unreachable" });
     }
+});
+
+router.get("/ai/evaluate", (req, res) => {
+    const scriptPath = path.resolve(__dirname, "..", "ai_evaluation.py");
+    const pythonCommand =
+        process.env.PYTHON_PATH ||
+        (process.platform === "win32"
+            ? "C:\\Python314\\python.exe"
+            : "python3");
+
+    const child = spawn(pythonCommand, [scriptPath], {
+        shell: false,
+        windowsHide: true,
+        env: {
+            ...process.env,
+            PYTHONIOENCODING: "utf-8",
+            PYTHONUTF8: "1",
+        },
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let finished = false;
+
+    const timeout = setTimeout(() => {
+        if (finished) return;
+        child.kill();
+    }, 30000);
+
+    child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString("utf8");
+    });
+
+    child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString("utf8");
+    });
+
+    child.on("error", (error) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeout);
+        console.error("Unable to start AI evaluation:", error);
+        return res.status(500).json({
+            available: false,
+            error: "Impossible de démarrer l'évaluation du modèle IA.",
+        });
+    });
+
+    child.on("close", () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeout);
+
+        const finalLine = stdout
+            .split(/\r?\n/)
+            .reverse()
+            .find((line) => line.startsWith("FINAL_RESULT_JSON="));
+
+        if (!finalLine) {
+            if (stderr) console.error(stderr);
+            return res.status(500).json({
+                available: false,
+                error: "L'évaluation du modèle IA n'a pas retourné de résultat.",
+            });
+        }
+
+        try {
+            const result = JSON.parse(
+                finalLine.slice("FINAL_RESULT_JSON=".length)
+            );
+            return res.json(result);
+        } catch (error) {
+            console.error("Invalid AI evaluation JSON:", error);
+            return res.status(500).json({
+                available: false,
+                error: "Le résultat de l'évaluation IA est invalide.",
+            });
+        }
+    });
 });
 
 module.exports = router;
