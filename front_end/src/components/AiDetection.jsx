@@ -4,6 +4,7 @@ import { fakeNodeData } from "./fakeData.js";
 
 export default function AiDetection({ testMode = false, testNodes = [] }) {
     const [ai, setAi] = useState(null);
+    const [evaluation, setEvaluation] = useState(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -62,6 +63,55 @@ export default function AiDetection({ testMode = false, testNodes = [] }) {
             clearInterval(interval);
         };
     }, [testMode, testNodes]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        if (testMode) {
+            setEvaluation(null);
+            return undefined;
+        }
+
+        const getEvaluation = async () => {
+            try {
+                const response = await fetch(
+                    "http://localhost:3000/api/ai/evaluate"
+                );
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        data.error || "Impossible d'évaluer le modèle IA"
+                    );
+                }
+
+                if (!cancelled) {
+                    setEvaluation(data);
+                }
+            } catch (err) {
+                console.error(err);
+                if (!cancelled) {
+                    setEvaluation({
+                        available: false,
+                        error:
+                            err.message ||
+                            "Évaluation du modèle IA indisponible",
+                    });
+                }
+            }
+        };
+
+        getEvaluation();
+        const interval = setInterval(getEvaluation, 30000);
+
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, [testMode]);
+
+    const matrix = evaluation?.confusion_matrix;
+    const metrics = evaluation?.metrics;
 
     return (
         <div className="ai-control">
@@ -132,6 +182,139 @@ export default function AiDetection({ testMode = false, testNodes = [] }) {
                             </div>
                         );
                     })}
+                </div>
+            )}
+
+            {!testMode && (
+                <div
+                    className="ai-evaluation"
+                    style={{
+                        marginTop: "25px",
+                        paddingTop: "15px",
+                        borderTop: "1px solid #ccc",
+                    }}
+                >
+                    <h3>Évaluation du modèle — Matrice de confusion</h3>
+
+                    {!evaluation ? (
+                        <p>Calcul de l'évaluation du modèle...</p>
+                    ) : !evaluation.available ? (
+                        <p className="metric-warning">
+                            {evaluation.reason ||
+                                evaluation.error ||
+                                "Évaluation indisponible."}
+                        </p>
+                    ) : (
+                        <>
+                            <p>
+                                Modèle : <strong>{evaluation.model}</strong>
+                            </p>
+                            <p>
+                                Données d'entraînement réelles :{" "}
+                                <strong>{evaluation.training_rows}</strong>
+                                {" — "}
+                                Scénarios de validation :{" "}
+                                <strong>{evaluation.validation_rows}</strong>
+                            </p>
+
+                            <div
+                                style={{
+                                    overflowX: "auto",
+                                    border: "1px solid #ccc",
+                                    borderRadius: "10px",
+                                    margin: "15px 0",
+                                }}
+                            >
+                                <table
+                                    style={{
+                                        width: "100%",
+                                        borderCollapse: "collapse",
+                                        textAlign: "center",
+                                    }}
+                                >
+                                    <thead>
+                                        <tr>
+                                            <th style={{ padding: "10px", borderBottom: "1px solid #ccc" }}>
+                                                Réel / Prédit
+                                            </th>
+                                            <th style={{ padding: "10px", borderBottom: "1px solid #ccc" }}>
+                                                Normal
+                                            </th>
+                                            <th style={{ padding: "10px", borderBottom: "1px solid #ccc" }}>
+                                                Anomalie
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <th style={{ padding: "10px", borderBottom: "1px solid #ccc" }}>
+                                                Normal
+                                            </th>
+                                            <td style={{ padding: "10px", borderBottom: "1px solid #ccc" }}>
+                                                <strong>{matrix.tn}</strong>
+                                                <br />
+                                                <small>TN</small>
+                                            </td>
+                                            <td style={{ padding: "10px", borderBottom: "1px solid #ccc" }}>
+                                                <strong>{matrix.fp}</strong>
+                                                <br />
+                                                <small>FP</small>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <th style={{ padding: "10px" }}>
+                                                Anomalie
+                                            </th>
+                                            <td style={{ padding: "10px" }}>
+                                                <strong>{matrix.fn}</strong>
+                                                <br />
+                                                <small>FN</small>
+                                            </td>
+                                            <td style={{ padding: "10px" }}>
+                                                <strong>{matrix.tp}</strong>
+                                                <br />
+                                                <small>TP</small>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div
+                                style={{
+                                    display: "grid",
+                                    gridTemplateColumns:
+                                        "repeat(auto-fit, minmax(150px, 1fr))",
+                                    gap: "10px",
+                                }}
+                            >
+                                <p>
+                                    Accuracy :{" "}
+                                    <strong>{Number(metrics.accuracy).toFixed(2)} %</strong>
+                                </p>
+                                <p>
+                                    Precision :{" "}
+                                    <strong>{Number(metrics.precision).toFixed(2)} %</strong>
+                                </p>
+                                <p>
+                                    Recall :{" "}
+                                    <strong>{Number(metrics.recall).toFixed(2)} %</strong>
+                                </p>
+                                <p>
+                                    F1-score :{" "}
+                                    <strong>{Number(metrics.f1_score).toFixed(2)} %</strong>
+                                </p>
+                            </div>
+
+                            <p style={{ fontSize: "0.9rem", marginTop: "12px" }}>
+                                {evaluation.validation_source}
+                            </p>
+                            <p style={{ fontSize: "0.9rem" }}>
+                                Classe positive : <strong>Anomalie</strong>. TN = normal correctement détecté,
+                                FP = fausse alerte, FN = anomalie manquée, TP = anomalie correctement détectée.
+                            </p>
+                        </>
+                    )}
                 </div>
             )}
         </div>
