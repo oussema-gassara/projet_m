@@ -84,6 +84,12 @@ function MetricPrediction({ metricKey, metric }) {
 
             <p>Données historiques utilisées : {metric.rows_used}</p>
 
+            {metric.model && (
+                <p>
+                    <small>Modèle : {metric.model}</small>
+                </p>
+            )}
+
             {predictedDanger ? (
                 <p className="metric-danger">{dangerMessage}</p>
             ) : predictedWarning ? (
@@ -228,7 +234,7 @@ function PredictionEvaluation({ evaluation }) {
             </p>
 
             <p style={{ fontSize: "0.9rem" }}>
-                La régression prédit une valeur continue. Pour construire la matrice de confusion,
+                La prédiction produit une valeur continue. Pour construire la matrice de confusion,
                 la valeur prédite et la vraie valeur mesurée 5 minutes plus tard sont transformées
                 en classes <strong>NORMAL</strong> / <strong>ANOMALIE</strong> avec les mêmes seuils que le dashboard.
             </p>
@@ -269,6 +275,9 @@ function PredictionEvaluation({ evaluation }) {
                             }}
                         >
                             <h5>{metric.label || metricLabels[metricKey]}</h5>
+                            <p>
+                                Modèle : <strong>{metric.model}</strong>
+                            </p>
                             <p>
                                 Règle ANOMALIE : <strong>{metric.anomaly_rule}</strong>
                                 {" — "}
@@ -427,7 +436,11 @@ export default function Prediction({ testMode = false }) {
                                         metric={node.forecasts?.wifi_signal}
                                     />
 
-                                    <small>Modèle : {node.model}</small>
+                                    <small>
+                                        CPU / Température / RAM : {node.model}
+                                        {" — "}
+                                        Wi-Fi : {node.forecasts?.wifi_signal?.model || "modèle RSSI dédié"}
+                                    </small>
                                 </div>
                             ))}
                         </div>
