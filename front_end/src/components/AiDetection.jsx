@@ -210,11 +210,23 @@ export default function AiDetection({ testMode = false, testNodes = [] }) {
                                 Modèle : <strong>{evaluation.model}</strong>
                             </p>
                             <p>
-                                Données d'entraînement réelles :{" "}
+                                Table utilisée : <strong>{evaluation.database_table}</strong>
+                            </p>
+                            <p>
+                                Mesures réelles lues :{" "}
+                                <strong>{evaluation.rows_read}</strong>
+                                {" — "}
+                                Entraînement :{" "}
                                 <strong>{evaluation.training_rows}</strong>
                                 {" — "}
-                                Scénarios de validation :{" "}
+                                Validation réelle :{" "}
                                 <strong>{evaluation.validation_rows}</strong>
+                            </p>
+                            <p>
+                                Validation réelle :{" "}
+                                <strong>{evaluation.real_normal_rows}</strong> normales
+                                {" — "}
+                                <strong>{evaluation.real_anomaly_rows}</strong> anomalies
                             </p>
 
                             <div
