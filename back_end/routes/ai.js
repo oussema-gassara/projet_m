@@ -7,6 +7,11 @@ const router = express.Router();
 
 const MIN_FORECAST_ROWS = 20;
 const WIFI_FORECAST_ROWS = 120;
+const WIFI_LOCAL_ROWS = 60;
+const WIFI_SMOOTHING_WINDOW = 5;
+const WIFI_RECENT_LEVEL_ROWS = 15;
+const WIFI_TREND_DAMPING = 0.5;
+const WIFI_MAX_TREND_PER_MINUTE = 1.0;
 
 async function getWifiSignalHistory(nodeName) {
     const [rows] = await db.promise().query(
@@ -39,7 +44,39 @@ function unavailableWifiForecast(reason, rowsUsed = 0) {
         rows_used: rowsUsed,
         forecast: [],
         unit: "dBm",
+        model: "RSSI lissé + tendance locale amortie",
     };
+}
+
+function median(values) {
+    if (!values.length) return 0;
+
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+
+    if (sorted.length % 2 === 0) {
+        return (sorted[middle - 1] + sorted[middle]) / 2;
+    }
+
+    return sorted[middle];
+}
+
+function clamp(value, minimum, maximum) {
+    return Math.max(minimum, Math.min(maximum, value));
+}
+
+function smoothWifiPoints(points) {
+    return points.map((point, index) => {
+        const start = Math.max(0, index - WIFI_SMOOTHING_WINDOW + 1);
+        const windowValues = points
+            .slice(start, index + 1)
+            .map((item) => item.y);
+
+        return {
+            x: point.x,
+            y: median(windowValues),
+        };
+    });
 }
 
 function forecastWifiSignal(history) {
@@ -50,19 +87,27 @@ function forecastWifiSignal(history) {
         );
     }
 
-    const firstTime = history[0].createdAt.getTime();
-    const points = history.map((row) => ({
-        x: (row.createdAt.getTime() - firstTime) / 1000,
+    // RSSI changes quickly. Use only the most recent local window instead of
+    // extrapolating a long global regression far into the future.
+    const localHistory = history.slice(-WIFI_LOCAL_ROWS);
+    const firstTime = localHistory[0].createdAt.getTime();
+    const rawPoints = localHistory.map((row) => ({
+        x: (row.createdAt.getTime() - firstTime) / 60_000,
         y: row.value,
     }));
 
-    if (points[points.length - 1].x <= points[0].x) {
+    if (rawPoints[rawPoints.length - 1].x <= rawPoints[0].x) {
         return unavailableWifiForecast(
             "Les données historiques ne contiennent pas assez de variation temporelle",
-            history.length
+            localHistory.length
         );
     }
 
+    // A rolling median removes short RSSI spikes without hiding the recent
+    // signal level. The forecast is anchored on the recent median, which
+    // prevents the regression intercept from predicting a stronger signal
+    // while the measured RSSI is already weak.
+    const points = smoothWifiPoints(rawPoints);
     const meanX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
     const meanY = points.reduce((sum, point) => sum + point.y, 0) / points.length;
 
@@ -77,29 +122,45 @@ function forecastWifiSignal(history) {
     if (denominator === 0) {
         return unavailableWifiForecast(
             "Impossible de calculer la tendance du signal Wi-Fi",
-            history.length
+            localHistory.length
         );
     }
 
-    const slopePerSecond = numerator / denominator;
-    const intercept = meanY - slopePerSecond * meanX;
-    const lastTime = points[points.length - 1].x;
+    const rawTrendPerMinute = numerator / denominator;
+    const trendPerMinute = clamp(
+        rawTrendPerMinute,
+        -WIFI_MAX_TREND_PER_MINUTE,
+        WIFI_MAX_TREND_PER_MINUTE
+    );
+
+    const recentValues = rawPoints
+        .slice(-WIFI_RECENT_LEVEL_ROWS)
+        .map((point) => point.y);
+    const recentLevel = median(recentValues);
 
     const forecast = [1, 2, 3, 4, 5].map((minutesAhead) => ({
         minutes_ahead: minutesAhead,
         value: Number(
-            (intercept + slopePerSecond * (lastTime + minutesAhead * 60)).toFixed(2)
+            (
+                recentLevel +
+                trendPerMinute * WIFI_TREND_DAMPING * minutesAhead
+            ).toFixed(2)
         ),
     }));
 
     return {
         available: true,
-        current: Number(points[points.length - 1].y.toFixed(2)),
+        current: Number(rawPoints[rawPoints.length - 1].y.toFixed(2)),
+        smoothed_current: Number(recentLevel.toFixed(2)),
         predicted_5min: forecast[forecast.length - 1].value,
-        trend_per_minute: Number((slopePerSecond * 60).toFixed(4)),
+        trend_per_minute: Number(
+            (trendPerMinute * WIFI_TREND_DAMPING).toFixed(4)
+        ),
+        raw_trend_per_minute: Number(rawTrendPerMinute.toFixed(4)),
         forecast,
-        rows_used: history.length,
+        rows_used: localHistory.length,
         unit: "dBm",
+        model: "RSSI lissé + tendance locale amortie",
     };
 }
 
