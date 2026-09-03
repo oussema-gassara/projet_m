@@ -1,7 +1,5 @@
 import json
 import os
-import random
-import sys
 
 import mysql.connector
 import pandas as pd
@@ -26,12 +24,19 @@ FEATURES = [
     "external_temperature",
 ]
 
+# Same warning thresholds already used by the monitoring/AI diagnosis.
+RAM_ANOMALY_PERCENT = 70.0
+CPU_ANOMALY_C = 60.0
+WIFI_ANOMALY_DBM = -65.0
+EXTERNAL_TEMP_ANOMALY_C = 30.0
 
-def get_recent_training_data(limit=200):
+
+def get_real_measurements(limit=500):
+    """Read only real ESP32 measurements stored in monitoring_data."""
     conn = mysql.connector.connect(**DB_CONFIG)
     query = """
-        SELECT used_ram, total_ram, cpu_temperature,
-               wifi_signal, external_temperature
+        SELECT id, node_name, used_ram, total_ram, cpu_temperature,
+               wifi_signal, external_temperature, created_at
         FROM monitoring_data
         WHERE node_name IS NOT NULL
           AND node_name LIKE 'esp32%'
@@ -50,102 +55,35 @@ def get_recent_training_data(limit=200):
     for column in FEATURES + ["total_ram"]:
         df[column] = pd.to_numeric(df[column], errors="coerce")
 
-    return df.dropna(subset=FEATURES + ["total_ram"]).reset_index(drop=True)
+    df = df.dropna(subset=FEATURES + ["total_ram"])
+
+    # Query returns newest first. Reverse so the split remains chronological:
+    # older rows train the model, newer rows evaluate it.
+    return df.sort_values("id").reset_index(drop=True)
 
 
-def clamp(value, minimum, maximum):
-    return max(minimum, min(maximum, value))
-
-
-def build_validation_dataset(training_df):
+def label_real_measurement(row):
     """
-    Build deterministic labelled validation scenarios around the recent ESP32
-    baseline. Labels are reference labels based on the project's alert limits.
-
+    Reference label from the project's monitoring limits.
     0 = NORMAL
     1 = ANOMALIE
     """
-    rng = random.Random(42)
+    total_ram = float(row["total_ram"] or 0)
+    used_ram = float(row["used_ram"] or 0)
+    ram_percent = (used_ram / total_ram) * 100 if total_ram > 0 else 0
 
-    total_ram = float(training_df["total_ram"].median())
-    if not total_ram or total_ram <= 0:
-        total_ram = 323836.0
+    cpu_temp = float(row["cpu_temperature"])
+    wifi_signal = float(row["wifi_signal"])
+    external_temp = float(row["external_temperature"])
 
-    used_ram = float(training_df["used_ram"].median())
-    cpu_temp = float(training_df["cpu_temperature"].median())
-    wifi_signal = float(training_df["wifi_signal"].median())
-    external_temp = float(training_df["external_temperature"].median())
+    is_anomaly = (
+        ram_percent > RAM_ANOMALY_PERCENT
+        or cpu_temp > CPU_ANOMALY_C
+        or wifi_signal < WIFI_ANOMALY_DBM
+        or external_temp > EXTERNAL_TEMP_ANOMALY_C
+    )
 
-    # Keep the normal reference scenarios inside the normal limits used by
-    # the monitoring project, while remaining close to the recent baseline.
-    normal_used_ram = clamp(used_ram, total_ram * 0.20, total_ram * 0.60)
-    normal_cpu = clamp(cpu_temp, 35.0, 55.0)
-    normal_wifi = clamp(wifi_signal, -62.0, -45.0)
-    normal_external = clamp(external_temp, 15.0, 28.0)
-
-    rows = []
-
-    # 40 labelled NORMAL scenarios.
-    for _ in range(40):
-        rows.append({
-            "used_ram": clamp(
-                normal_used_ram * rng.uniform(0.94, 1.06),
-                total_ram * 0.15,
-                total_ram * 0.65,
-            ),
-            "cpu_temperature": clamp(
-                normal_cpu + rng.uniform(-2.0, 2.0), 30.0, 59.0
-            ),
-            "wifi_signal": clamp(
-                normal_wifi + rng.uniform(-2.0, 2.0), -64.0, -40.0
-            ),
-            "external_temperature": clamp(
-                normal_external + rng.uniform(-1.5, 1.5), 10.0, 29.0
-            ),
-            "label": 0,
-        })
-
-    # 10 CPU anomalies.
-    for _ in range(10):
-        rows.append({
-            "used_ram": normal_used_ram,
-            "cpu_temperature": rng.uniform(65.0, 90.0),
-            "wifi_signal": normal_wifi,
-            "external_temperature": normal_external,
-            "label": 1,
-        })
-
-    # 10 Wi-Fi anomalies.
-    for _ in range(10):
-        rows.append({
-            "used_ram": normal_used_ram,
-            "cpu_temperature": normal_cpu,
-            "wifi_signal": rng.uniform(-95.0, -70.0),
-            "external_temperature": normal_external,
-            "label": 1,
-        })
-
-    # 10 external-temperature anomalies.
-    for _ in range(10):
-        rows.append({
-            "used_ram": normal_used_ram,
-            "cpu_temperature": normal_cpu,
-            "wifi_signal": normal_wifi,
-            "external_temperature": rng.uniform(35.0, 50.0),
-            "label": 1,
-        })
-
-    # 10 RAM anomalies.
-    for _ in range(10):
-        rows.append({
-            "used_ram": total_ram * rng.uniform(0.75, 0.95),
-            "cpu_temperature": normal_cpu,
-            "wifi_signal": normal_wifi,
-            "external_temperature": normal_external,
-            "label": 1,
-        })
-
-    return pd.DataFrame(rows)
+    return 1 if is_anomaly else 0
 
 
 def safe_ratio(numerator, denominator):
@@ -153,24 +91,40 @@ def safe_ratio(numerator, denominator):
 
 
 def evaluate_model():
-    training_df = get_recent_training_data()
+    df = get_real_measurements()
 
-    if len(training_df) < 20:
+    if len(df) < 40:
         return {
             "available": False,
-            "reason": "Pas encore assez de données réelles pour entraîner et évaluer Isolation Forest.",
+            "reason": "Pas encore assez de mesures réelles dans monitoring_data pour évaluer Isolation Forest.",
+            "rows_available": len(df),
+        }
+
+    # Chronological hold-out: 70% older real rows for training,
+    # 30% newest real rows for evaluation.
+    split_index = max(20, int(len(df) * 0.70))
+    if split_index >= len(df):
+        split_index = len(df) - 1
+
+    training_df = df.iloc[:split_index].copy()
+    validation_df = df.iloc[split_index:].copy()
+
+    if len(validation_df) < 10:
+        return {
+            "available": False,
+            "reason": "Pas encore assez de mesures réelles récentes pour constituer le jeu de validation.",
             "training_rows": len(training_df),
+            "validation_rows": len(validation_df),
         }
 
     model = IsolationForest(contamination="auto", random_state=42)
     model.fit(training_df[FEATURES])
 
-    validation_df = build_validation_dataset(training_df)
     predicted_raw = model.predict(validation_df[FEATURES])
 
     # Isolation Forest: 1 = inlier/normal, -1 = outlier/anomaly.
     predicted = [1 if value == -1 else 0 for value in predicted_raw]
-    actual = validation_df["label"].astype(int).tolist()
+    actual = validation_df.apply(label_real_measurement, axis=1).astype(int).tolist()
 
     tn = sum(1 for y, p in zip(actual, predicted) if y == 0 and p == 0)
     fp = sum(1 for y, p in zip(actual, predicted) if y == 0 and p == 1)
@@ -183,16 +137,31 @@ def evaluate_model():
     recall = safe_ratio(tp, tp + fn)
     f1 = safe_ratio(2 * precision * recall, precision + recall)
 
+    real_normal = sum(1 for value in actual if value == 0)
+    real_anomaly = sum(1 for value in actual if value == 1)
+
     return {
         "available": True,
         "model": "Isolation Forest",
         "features": FEATURES,
+        "database_table": "monitoring_data",
+        "rows_read": len(df),
         "training_rows": len(training_df),
         "validation_rows": len(validation_df),
+        "real_normal_rows": real_normal,
+        "real_anomaly_rows": real_anomaly,
         "validation_source": (
-            "Scénarios de validation étiquetés NORMAL/ANOMALIE, construits autour "
-            "des mesures réelles récentes et des seuils du projet."
+            "Évaluation réalisée uniquement avec les mesures réelles de la table monitoring_data. "
+            "Les 70 % mesures les plus anciennes entraînent Isolation Forest et les 30 % mesures "
+            "récentes servent au test. La classe réelle NORMAL/ANOMALIE est déterminée avec les "
+            "seuils du système de monitoring."
         ),
+        "reference_thresholds": {
+            "ram_usage_percent": RAM_ANOMALY_PERCENT,
+            "cpu_temperature": CPU_ANOMALY_C,
+            "wifi_signal": WIFI_ANOMALY_DBM,
+            "external_temperature": EXTERNAL_TEMP_ANOMALY_C,
+        },
         "labels": {
             "normal": 0,
             "anomaly": 1,
