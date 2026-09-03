@@ -25,6 +25,10 @@ export default function Rasberry({ testMode = false }) {
     const [configMessage, setConfigMessage] = useState("");
     const [configError, setConfigError] = useState("");
 
+    const [installLoading, setInstallLoading] = useState(false);
+    const [installResult, setInstallResult] = useState(null);
+    const [installError, setInstallError] = useState("");
+
     const isAdmin = localStorage.getItem("role") === "admin";
 
     useEffect(() => {
@@ -127,11 +131,59 @@ export default function Rasberry({ testMode = false }) {
             setConfigConfigured(true);
             setShowConfigForm(false);
             setConfigMessage("Configuration Raspberry Pi enregistrée.");
+            setInstallResult(null);
+            setInstallError("");
         } catch (error) {
             console.error(error);
             setConfigError(error.message);
         } finally {
             setConfigLoading(false);
+        }
+    };
+
+    const handleInstall = async () => {
+        if (installLoading) return;
+
+        if (!configConfigured) {
+            setInstallError("Enregistrez d'abord la configuration SSH / Ethernet.");
+            return;
+        }
+
+        setInstallLoading(true);
+        setInstallResult(null);
+        setInstallError("");
+
+        try {
+            const token = localStorage.getItem("token");
+            const response = await fetch(
+                "http://localhost:3000/api/raspberry/install",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                        node_name: rasberry?.node_name || "raspberry-1",
+                    }),
+                }
+            );
+
+            const data = await response.json();
+            setInstallResult(data);
+
+            if (!response.ok) {
+                throw new Error(
+                    data.message || "Impossible d'installer automatiquement l'agent Raspberry Pi."
+                );
+            }
+        } catch (error) {
+            console.error(error);
+            setInstallError(
+                error.message || "Installation automatique du Raspberry Pi impossible."
+            );
+        } finally {
+            setInstallLoading(false);
         }
     };
 
@@ -174,6 +226,12 @@ export default function Rasberry({ testMode = false }) {
         }
     };
 
+    const createdAt = rasberry?.created_at
+        ? new Date(rasberry.created_at).getTime()
+        : NaN;
+    const rasberryOnline =
+        Number.isFinite(createdAt) && Date.now() - createdAt < 10000;
+
     return (
         <>
             {!testMode && isAdmin && (
@@ -195,7 +253,7 @@ export default function Rasberry({ testMode = false }) {
                         }}
                     >
                         <h2 style={{ margin: 0 }}>
-                            Configuration du diagnostic Raspberry Pi
+                            Configuration du Raspberry Pi
                         </h2>
 
                         <button
@@ -230,7 +288,7 @@ export default function Rasberry({ testMode = false }) {
                     {showConfigForm && (
                         <form onSubmit={handleSaveDiagnosticConfig} style={{ marginTop: "15px" }}>
                             <p>
-                                Ces informations servent uniquement au diagnostic SSH via Ethernet.
+                                Ces informations servent à l'installation automatique et au diagnostic SSH via Ethernet.
                             </p>
 
                             <label>
@@ -330,6 +388,75 @@ export default function Rasberry({ testMode = false }) {
 
                     {configError && (
                         <p className="metric-danger">{configError}</p>
+                    )}
+
+                    {configConfigured && (
+                        <div
+                            style={{
+                                marginTop: "18px",
+                                paddingTop: "15px",
+                                borderTop: "1px solid #ccc",
+                            }}
+                        >
+                            <h3>Installation automatique de l'agent</h3>
+                            <p>
+                                Le backend se connecte en SSH, installe l'agent dans
+                                <strong> /opt/iot-monitoring</strong> et crée un service systemd qui démarre automatiquement avec le Raspberry Pi.
+                            </p>
+
+                            <button
+                                type="button"
+                                className="setup-yes-button"
+                                onClick={handleInstall}
+                                disabled={installLoading}
+                                style={{ borderRadius: "10px" }}
+                            >
+                                {installLoading
+                                    ? "Installation en cours..."
+                                    : "Connecter et installer le Raspberry Pi"}
+                            </button>
+
+                            {installResult?.steps && (
+                                <div style={{ marginTop: "15px" }}>
+                                    {installResult.steps.map((step) => (
+                                        <p
+                                            key={step.id}
+                                            className={step.ok ? "metric-good" : "metric-warning"}
+                                            style={{ margin: "6px 0" }}
+                                        >
+                                            {step.ok ? "✅" : "○"} {step.label}
+                                        </p>
+                                    ))}
+                                </div>
+                            )}
+
+                            {installResult?.installed && (
+                                <>
+                                    <p className="metric-good">
+                                        Agent installé : {installResult.agent_path}
+                                    </p>
+                                    <p className="metric-good">
+                                        Service automatique : {installResult.service}
+                                    </p>
+                                </>
+                            )}
+
+                            {installResult?.installed && !rasberryOnline && (
+                                <p className="metric-warning">
+                                    Installation terminée. En attente des premières données du Raspberry Pi...
+                                </p>
+                            )}
+
+                            {rasberryOnline && (
+                                <p className="metric-good" style={{ fontWeight: "bold" }}>
+                                    ✅ System Availability: Online — les données arrivent automatiquement dans le dashboard.
+                                </p>
+                            )}
+
+                            {installError && (
+                                <p className="metric-danger">{installError}</p>
+                            )}
+                        </div>
                     )}
                 </section>
             )}
