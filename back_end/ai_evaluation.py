@@ -1,10 +1,12 @@
 import json
+import math
 import os
 
 import mysql.connector
+import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
-from sklearn.ensemble import IsolationForest
+from sklearn.linear_model import LinearRegression
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,167 +19,334 @@ DB_CONFIG = {
     "database": os.getenv("DB_NAME"),
 }
 
-FEATURES = [
-    "used_ram",
-    "cpu_temperature",
-    "wifi_signal",
-    "external_temperature",
-]
+HORIZON_SECONDS = 5 * 60
+MAX_ROWS_PER_NODE = 2500
+MAX_WINDOW_ROWS = 120
+MIN_WINDOW_ROWS = 20
+BACKTEST_STRIDE = 10
+TARGET_TOLERANCE_SECONDS = 45
 
-# Same warning thresholds already used by the monitoring/AI diagnosis.
-RAM_ANOMALY_PERCENT = 70.0
-CPU_ANOMALY_C = 60.0
-WIFI_ANOMALY_DBM = -65.0
-EXTERNAL_TEMP_ANOMALY_C = 30.0
+METRICS = {
+    "cpu_temperature": {
+        "label": "Température du processeur",
+        "unit": "°C",
+        "threshold": 60.0,
+        "direction": "high",
+    },
+    "external_temperature": {
+        "label": "Température externe",
+        "unit": "°C",
+        "threshold": 30.0,
+        "direction": "high",
+    },
+    "ram_usage_percent": {
+        "label": "Utilisation de la RAM",
+        "unit": "%",
+        "threshold": 70.0,
+        "direction": "high",
+    },
+    "wifi_signal": {
+        "label": "Signal Wi-Fi",
+        "unit": "dBm",
+        "threshold": -65.0,
+        "direction": "low",
+    },
+}
 
 
-def get_real_measurements(limit=500):
-    """Read only real ESP32 measurements stored in monitoring_data."""
+def get_node_names():
     conn = mysql.connector.connect(**DB_CONFIG)
     query = """
-        SELECT id, node_name, used_ram, total_ram, cpu_temperature,
-               wifi_signal, external_temperature, created_at
+        SELECT DISTINCT node_name
         FROM monitoring_data
         WHERE node_name IS NOT NULL
           AND node_name LIKE 'esp32%'
+        ORDER BY node_name
+    """
+    cursor = conn.cursor()
+    cursor.execute(query)
+    rows = [str(row[0]) for row in cursor.fetchall() if row and row[0]]
+    cursor.close()
+    conn.close()
+    return rows
+
+
+def get_node_measurements(node_name):
+    conn = mysql.connector.connect(**DB_CONFIG)
+    query = """
+        SELECT created_at, used_ram, total_ram, cpu_temperature,
+               wifi_signal, external_temperature
+        FROM monitoring_data
+        WHERE node_name = %s
           AND used_ram IS NOT NULL
           AND total_ram IS NOT NULL
           AND cpu_temperature IS NOT NULL
           AND wifi_signal IS NOT NULL
           AND external_temperature IS NOT NULL
-        ORDER BY id DESC
+        ORDER BY created_at DESC
         LIMIT %s
     """
-
-    df = pd.read_sql(query, conn, params=(limit,))
+    df = pd.read_sql(query, conn, params=(node_name, MAX_ROWS_PER_NODE))
     conn.close()
 
-    for column in FEATURES + ["total_ram"]:
+    if df.empty:
+        return df
+
+    df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
+    numeric_columns = [
+        "used_ram",
+        "total_ram",
+        "cpu_temperature",
+        "wifi_signal",
+        "external_temperature",
+    ]
+    for column in numeric_columns:
         df[column] = pd.to_numeric(df[column], errors="coerce")
 
-    df = df.dropna(subset=FEATURES + ["total_ram"])
+    df = df.dropna(subset=["created_at"] + numeric_columns)
+    df = df[df["total_ram"] > 0].copy()
+    df["ram_usage_percent"] = (df["used_ram"] / df["total_ram"]) * 100.0
 
-    # Query returns newest first. Reverse so the split remains chronological:
-    # older rows train the model, newer rows evaluate it.
-    return df.sort_values("id").reset_index(drop=True)
-
-
-def label_real_measurement(row):
-    """
-    Reference label from the project's monitoring limits.
-    0 = NORMAL
-    1 = ANOMALIE
-    """
-    total_ram = float(row["total_ram"] or 0)
-    used_ram = float(row["used_ram"] or 0)
-    ram_percent = (used_ram / total_ram) * 100 if total_ram > 0 else 0
-
-    cpu_temp = float(row["cpu_temperature"])
-    wifi_signal = float(row["wifi_signal"])
-    external_temp = float(row["external_temperature"])
-
-    is_anomaly = (
-        ram_percent > RAM_ANOMALY_PERCENT
-        or cpu_temp > CPU_ANOMALY_C
-        or wifi_signal < WIFI_ANOMALY_DBM
-        or external_temp > EXTERNAL_TEMP_ANOMALY_C
+    return (
+        df.sort_values("created_at")
+        .drop_duplicates(subset=["created_at"], keep="last")
+        .reset_index(drop=True)
     )
 
-    return 1 if is_anomaly else 0
+
+def is_anomaly(metric_key, value):
+    config = METRICS[metric_key]
+    threshold = config["threshold"]
+    if config["direction"] == "low":
+        return float(value) < threshold
+    return float(value) >= threshold
+
+
+def empty_counts():
+    return {"tn": 0, "fp": 0, "fn": 0, "tp": 0}
+
+
+def update_counts(counts, actual_anomaly, predicted_anomaly):
+    if not actual_anomaly and not predicted_anomaly:
+        counts["tn"] += 1
+    elif not actual_anomaly and predicted_anomaly:
+        counts["fp"] += 1
+    elif actual_anomaly and not predicted_anomaly:
+        counts["fn"] += 1
+    else:
+        counts["tp"] += 1
 
 
 def safe_ratio(numerator, denominator):
     return float(numerator / denominator) if denominator else 0.0
 
 
-def evaluate_model():
-    df = get_real_measurements()
+def classification_metrics(counts):
+    tn = counts["tn"]
+    fp = counts["fp"]
+    fn = counts["fn"]
+    tp = counts["tp"]
+    total = tn + fp + fn + tp
 
-    if len(df) < 40:
-        return {
-            "available": False,
-            "reason": "Pas encore assez de mesures réelles dans monitoring_data pour évaluer Isolation Forest.",
-            "rows_available": len(df),
-        }
-
-    # Chronological hold-out: 70% older real rows for training,
-    # 30% newest real rows for evaluation.
-    split_index = max(20, int(len(df) * 0.70))
-    if split_index >= len(df):
-        split_index = len(df) - 1
-
-    training_df = df.iloc[:split_index].copy()
-    validation_df = df.iloc[split_index:].copy()
-
-    if len(validation_df) < 10:
-        return {
-            "available": False,
-            "reason": "Pas encore assez de mesures réelles récentes pour constituer le jeu de validation.",
-            "training_rows": len(training_df),
-            "validation_rows": len(validation_df),
-        }
-
-    model = IsolationForest(contamination="auto", random_state=42)
-    model.fit(training_df[FEATURES])
-
-    predicted_raw = model.predict(validation_df[FEATURES])
-
-    # Isolation Forest: 1 = inlier/normal, -1 = outlier/anomaly.
-    predicted = [1 if value == -1 else 0 for value in predicted_raw]
-    actual = validation_df.apply(label_real_measurement, axis=1).astype(int).tolist()
-
-    tn = sum(1 for y, p in zip(actual, predicted) if y == 0 and p == 0)
-    fp = sum(1 for y, p in zip(actual, predicted) if y == 0 and p == 1)
-    fn = sum(1 for y, p in zip(actual, predicted) if y == 1 and p == 0)
-    tp = sum(1 for y, p in zip(actual, predicted) if y == 1 and p == 1)
-
-    total = tp + tn + fp + fn
     accuracy = safe_ratio(tp + tn, total)
     precision = safe_ratio(tp, tp + fp)
     recall = safe_ratio(tp, tp + fn)
     f1 = safe_ratio(2 * precision * recall, precision + recall)
 
-    real_normal = sum(1 for value in actual if value == 0)
-    real_anomaly = sum(1 for value in actual if value == 1)
+    return {
+        "accuracy": round(accuracy * 100, 2),
+        "precision": round(precision * 100, 2),
+        "recall": round(recall * 100, 2),
+        "f1_score": round(f1 * 100, 2),
+    }
+
+
+def regression_metrics(errors):
+    if not errors:
+        return {"mae": None, "rmse": None}
+
+    absolute = [abs(value) for value in errors]
+    squared = [value * value for value in errors]
+
+    return {
+        "mae": round(sum(absolute) / len(absolute), 3),
+        "rmse": round(math.sqrt(sum(squared) / len(squared)), 3),
+    }
+
+
+def nearest_future_index(timestamps_ns, start_index, target_ns):
+    insert_index = int(np.searchsorted(timestamps_ns, target_ns, side="left"))
+    candidates = []
+
+    for index in (insert_index - 1, insert_index):
+        if index > start_index and 0 <= index < len(timestamps_ns):
+            candidates.append(index)
+
+    if not candidates:
+        return None
+
+    best = min(candidates, key=lambda index: abs(int(timestamps_ns[index]) - int(target_ns)))
+    distance_seconds = abs(int(timestamps_ns[best]) - int(target_ns)) / 1_000_000_000
+
+    if distance_seconds > TARGET_TOLERANCE_SECONDS:
+        return None
+
+    return best
+
+
+def evaluate_node(node_name, df):
+    metric_counts = {key: empty_counts() for key in METRICS}
+    metric_errors = {key: [] for key in METRICS}
+    samples = 0
+
+    if len(df) < MIN_WINDOW_ROWS + 2:
+        return {
+            "node_name": node_name,
+            "rows_available": len(df),
+            "backtest_samples": 0,
+            "metrics": {},
+        }
+
+    timestamps = df["created_at"].astype("int64").to_numpy()
+
+    for anchor_index in range(MIN_WINDOW_ROWS - 1, len(df), BACKTEST_STRIDE):
+        anchor_ns = int(timestamps[anchor_index])
+        target_ns = anchor_ns + HORIZON_SECONDS * 1_000_000_000
+        actual_index = nearest_future_index(timestamps, anchor_index, target_ns)
+
+        if actual_index is None:
+            continue
+
+        window_start = max(0, anchor_index - MAX_WINDOW_ROWS + 1)
+        window = df.iloc[window_start : anchor_index + 1]
+        if len(window) < MIN_WINDOW_ROWS:
+            continue
+
+        elapsed_seconds = (
+            window["created_at"] - window["created_at"].iloc[0]
+        ).dt.total_seconds().to_numpy(dtype=float)
+
+        if elapsed_seconds[-1] <= elapsed_seconds[0]:
+            continue
+
+        prediction_time = elapsed_seconds[-1] + HORIZON_SECONDS
+        x = elapsed_seconds.reshape(-1, 1)
+        sample_used = False
+
+        for metric_key in METRICS:
+            values = pd.to_numeric(window[metric_key], errors="coerce").to_numpy(dtype=float)
+            if not np.isfinite(values).all():
+                continue
+
+            actual_value = float(df.iloc[actual_index][metric_key])
+            if not math.isfinite(actual_value):
+                continue
+
+            model = LinearRegression()
+            model.fit(x, values)
+            predicted_value = float(model.predict([[prediction_time]])[0])
+
+            predicted_anomaly = is_anomaly(metric_key, predicted_value)
+            actual_anomaly = is_anomaly(metric_key, actual_value)
+
+            update_counts(
+                metric_counts[metric_key],
+                actual_anomaly=actual_anomaly,
+                predicted_anomaly=predicted_anomaly,
+            )
+            metric_errors[metric_key].append(predicted_value - actual_value)
+            sample_used = True
+
+        if sample_used:
+            samples += 1
+
+    metric_results = {}
+    for metric_key, config in METRICS.items():
+        counts = metric_counts[metric_key]
+        total = sum(counts.values())
+        metric_results[metric_key] = {
+            "label": config["label"],
+            "unit": config["unit"],
+            "threshold": config["threshold"],
+            "anomaly_rule": (
+                f"< {config['threshold']} {config['unit']}"
+                if config["direction"] == "low"
+                else f">= {config['threshold']} {config['unit']}"
+            ),
+            "evaluations": total,
+            "confusion_matrix": counts,
+            "classification_metrics": classification_metrics(counts),
+            "regression_metrics": regression_metrics(metric_errors[metric_key]),
+        }
+
+    return {
+        "node_name": node_name,
+        "rows_available": len(df),
+        "backtest_samples": samples,
+        "metrics": metric_results,
+    }
+
+
+def merge_counts(target, source):
+    for key in ("tn", "fp", "fn", "tp"):
+        target[key] += int(source.get(key, 0))
+
+
+def evaluate_model():
+    node_names = get_node_names()
+
+    if not node_names:
+        return {
+            "available": False,
+            "reason": "Aucune mesure ESP32 réelle disponible dans monitoring_data.",
+        }
+
+    nodes = []
+    overall_counts = empty_counts()
+    total_rows = 0
+    total_evaluations = 0
+
+    for node_name in node_names:
+        df = get_node_measurements(node_name)
+        total_rows += len(df)
+        node_result = evaluate_node(node_name, df)
+        nodes.append(node_result)
+
+        for metric_result in node_result["metrics"].values():
+            counts = metric_result["confusion_matrix"]
+            merge_counts(overall_counts, counts)
+            total_evaluations += sum(counts.values())
+
+    if total_evaluations == 0:
+        return {
+            "available": False,
+            "reason": (
+                "Pas encore assez d'historique réel couvrant au moins 5 minutes "
+                "pour comparer les prévisions aux mesures futures."
+            ),
+            "database_table": "monitoring_data",
+            "rows_read": total_rows,
+            "horizon_minutes": 5,
+        }
 
     return {
         "available": True,
-        "model": "Isolation Forest",
-        "features": FEATURES,
+        "model": "Linear Regression (time-series trend)",
         "database_table": "monitoring_data",
-        "rows_read": len(df),
-        "training_rows": len(training_df),
-        "validation_rows": len(validation_df),
-        "real_normal_rows": real_normal,
-        "real_anomaly_rows": real_anomaly,
-        "validation_source": (
-            "Évaluation réalisée uniquement avec les mesures réelles de la table monitoring_data. "
-            "Les 70 % mesures les plus anciennes entraînent Isolation Forest et les 30 % mesures "
-            "récentes servent au test. La classe réelle NORMAL/ANOMALIE est déterminée avec les "
-            "seuils du système de monitoring."
+        "rows_read": total_rows,
+        "horizon_minutes": 5,
+        "validation_method": (
+            "Backtest chronologique sur les mesures réelles : pour chaque fenêtre historique, "
+            "le modèle prédit la valeur à +5 minutes puis la compare à la mesure réelle la plus "
+            "proche de +5 minutes. Les valeurs prévues et réelles sont converties en NORMAL/ANOMALIE "
+            "avec les mêmes seuils que le dashboard."
         ),
-        "reference_thresholds": {
-            "ram_usage_percent": RAM_ANOMALY_PERCENT,
-            "cpu_temperature": CPU_ANOMALY_C,
-            "wifi_signal": WIFI_ANOMALY_DBM,
-            "external_temperature": EXTERNAL_TEMP_ANOMALY_C,
+        "overall": {
+            "evaluations": total_evaluations,
+            "confusion_matrix": overall_counts,
+            "classification_metrics": classification_metrics(overall_counts),
         },
-        "labels": {
-            "normal": 0,
-            "anomaly": 1,
-        },
-        "confusion_matrix": {
-            "tn": tn,
-            "fp": fp,
-            "fn": fn,
-            "tp": tp,
-        },
-        "metrics": {
-            "accuracy": round(accuracy * 100, 2),
-            "precision": round(precision * 100, 2),
-            "recall": round(recall * 100, 2),
-            "f1_score": round(f1 * 100, 2),
-        },
+        "nodes": nodes,
     }
 
 
@@ -187,7 +356,7 @@ def main():
     except Exception as error:
         result = {
             "available": False,
-            "reason": f"Impossible d'évaluer le modèle IA: {error}",
+            "reason": f"Impossible d'évaluer le modèle de prédiction: {error}",
         }
 
     print("FINAL_RESULT_JSON=" + json.dumps(result, ensure_ascii=False))
