@@ -30,7 +30,8 @@ TARGET_TOLERANCE_SECONDS = 45
 WIFI_LOCAL_ROWS = 60
 WIFI_SMOOTHING_WINDOW = 5
 WIFI_RECENT_LEVEL_ROWS = 15
-WIFI_TREND_DAMPING = 0.5
+WIFI_DEGRADATION_DAMPING = 0.5
+WIFI_IMPROVEMENT_DAMPING = 0.25
 WIFI_MAX_TREND_PER_MINUTE = 1.0
 
 METRICS = {
@@ -244,13 +245,18 @@ def forecast_wifi_signal(window, horizon_seconds=HORIZON_SECONDS):
         min(WIFI_MAX_TREND_PER_MINUTE, raw_trend_per_minute),
     )
 
+    damping = (
+        WIFI_IMPROVEMENT_DAMPING
+        if trend_per_minute > 0
+        else WIFI_DEGRADATION_DAMPING
+    )
+    effective_trend_per_minute = trend_per_minute * damping
+
     recent_values = raw_values.tail(WIFI_RECENT_LEVEL_ROWS).to_numpy(dtype=float)
     recent_level = float(np.median(recent_values))
     horizon_minutes = horizon_seconds / 60.0
 
-    return recent_level + (
-        trend_per_minute * WIFI_TREND_DAMPING * horizon_minutes
-    )
+    return recent_level + (effective_trend_per_minute * horizon_minutes)
 
 
 def evaluate_node(node_name, df):
@@ -406,9 +412,10 @@ def evaluate_model():
             "Backtest chronologique sur les mesures réelles : pour chaque fenêtre historique, "
             "le modèle prédit la valeur à +5 minutes puis la compare à la mesure réelle la plus "
             "proche de +5 minutes. CPU, température externe et RAM utilisent la régression linéaire. "
-            "Le Wi-Fi utilise un lissage médian et une tendance locale amortie pour réduire l'effet "
-            "des fluctuations rapides du RSSI. Les valeurs prévues et réelles sont converties en "
-            "NORMAL/ANOMALIE avec les mêmes seuils que le dashboard."
+            "Le Wi-Fi utilise un lissage médian et une tendance locale amortie ; une amélioration "
+            "du RSSI est volontairement plus amortie qu'une dégradation afin de limiter les faux "
+            "retours à NORMAL causés par des fluctuations brèves. Les valeurs prévues et réelles "
+            "sont converties en NORMAL/ANOMALIE avec les mêmes seuils que le dashboard."
         ),
         "overall": {
             "evaluations": total_evaluations,
