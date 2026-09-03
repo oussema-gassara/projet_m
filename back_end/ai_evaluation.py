@@ -26,30 +26,41 @@ MIN_WINDOW_ROWS = 20
 BACKTEST_STRIDE = 10
 TARGET_TOLERANCE_SECONDS = 45
 
+# Must stay aligned with back_end/routes/ai.js.
+WIFI_LOCAL_ROWS = 60
+WIFI_SMOOTHING_WINDOW = 5
+WIFI_RECENT_LEVEL_ROWS = 15
+WIFI_TREND_DAMPING = 0.5
+WIFI_MAX_TREND_PER_MINUTE = 1.0
+
 METRICS = {
     "cpu_temperature": {
         "label": "Température du processeur",
         "unit": "°C",
         "threshold": 60.0,
         "direction": "high",
+        "model": "Linear Regression (time-series trend)",
     },
     "external_temperature": {
         "label": "Température externe",
         "unit": "°C",
         "threshold": 30.0,
         "direction": "high",
+        "model": "Linear Regression (time-series trend)",
     },
     "ram_usage_percent": {
         "label": "Utilisation de la RAM",
         "unit": "%",
         "threshold": 70.0,
         "direction": "high",
+        "model": "Linear Regression (time-series trend)",
     },
     "wifi_signal": {
         "label": "Signal Wi-Fi",
         "unit": "dBm",
         "threshold": -65.0,
         "direction": "low",
+        "model": "RSSI lissé + tendance locale amortie",
     },
 }
 
@@ -194,6 +205,54 @@ def nearest_future_index(timestamps_ns, start_index, target_ns):
     return best
 
 
+def forecast_wifi_signal(window, horizon_seconds=HORIZON_SECONDS):
+    """Mirror the production RSSI forecast used in routes/ai.js."""
+    local = window.tail(WIFI_LOCAL_ROWS).copy()
+    if len(local) < MIN_WINDOW_ROWS:
+        return None
+
+    elapsed_minutes = (
+        local["created_at"] - local["created_at"].iloc[0]
+    ).dt.total_seconds().to_numpy(dtype=float) / 60.0
+
+    if elapsed_minutes[-1] <= elapsed_minutes[0]:
+        return None
+
+    raw_values = pd.to_numeric(local["wifi_signal"], errors="coerce")
+    if raw_values.isna().any():
+        return None
+
+    smoothed = (
+        raw_values
+        .rolling(window=WIFI_SMOOTHING_WINDOW, min_periods=1)
+        .median()
+        .to_numpy(dtype=float)
+    )
+
+    x_mean = float(np.mean(elapsed_minutes))
+    y_mean = float(np.mean(smoothed))
+    denominator = float(np.sum((elapsed_minutes - x_mean) ** 2))
+    if denominator == 0:
+        return None
+
+    numerator = float(
+        np.sum((elapsed_minutes - x_mean) * (smoothed - y_mean))
+    )
+    raw_trend_per_minute = numerator / denominator
+    trend_per_minute = max(
+        -WIFI_MAX_TREND_PER_MINUTE,
+        min(WIFI_MAX_TREND_PER_MINUTE, raw_trend_per_minute),
+    )
+
+    recent_values = raw_values.tail(WIFI_RECENT_LEVEL_ROWS).to_numpy(dtype=float)
+    recent_level = float(np.median(recent_values))
+    horizon_minutes = horizon_seconds / 60.0
+
+    return recent_level + (
+        trend_per_minute * WIFI_TREND_DAMPING * horizon_minutes
+    )
+
+
 def evaluate_node(node_name, df):
     metric_counts = {key: empty_counts() for key in METRICS}
     metric_errors = {key: [] for key in METRICS}
@@ -234,17 +293,24 @@ def evaluate_node(node_name, df):
         sample_used = False
 
         for metric_key in METRICS:
-            values = pd.to_numeric(window[metric_key], errors="coerce").to_numpy(dtype=float)
-            if not np.isfinite(values).all():
-                continue
-
             actual_value = float(df.iloc[actual_index][metric_key])
             if not math.isfinite(actual_value):
                 continue
 
-            model = LinearRegression()
-            model.fit(x, values)
-            predicted_value = float(model.predict([[prediction_time]])[0])
+            if metric_key == "wifi_signal":
+                predicted_value = forecast_wifi_signal(window)
+                if predicted_value is None or not math.isfinite(predicted_value):
+                    continue
+            else:
+                values = pd.to_numeric(
+                    window[metric_key], errors="coerce"
+                ).to_numpy(dtype=float)
+                if not np.isfinite(values).all():
+                    continue
+
+                model = LinearRegression()
+                model.fit(x, values)
+                predicted_value = float(model.predict([[prediction_time]])[0])
 
             predicted_anomaly = is_anomaly(metric_key, predicted_value)
             actual_anomaly = is_anomaly(metric_key, actual_value)
@@ -268,6 +334,7 @@ def evaluate_node(node_name, df):
             "label": config["label"],
             "unit": config["unit"],
             "threshold": config["threshold"],
+            "model": config["model"],
             "anomaly_rule": (
                 f"< {config['threshold']} {config['unit']}"
                 if config["direction"] == "low"
@@ -331,15 +398,17 @@ def evaluate_model():
 
     return {
         "available": True,
-        "model": "Linear Regression (time-series trend)",
+        "model": "Linear Regression + modèle RSSI lissé",
         "database_table": "monitoring_data",
         "rows_read": total_rows,
         "horizon_minutes": 5,
         "validation_method": (
             "Backtest chronologique sur les mesures réelles : pour chaque fenêtre historique, "
             "le modèle prédit la valeur à +5 minutes puis la compare à la mesure réelle la plus "
-            "proche de +5 minutes. Les valeurs prévues et réelles sont converties en NORMAL/ANOMALIE "
-            "avec les mêmes seuils que le dashboard."
+            "proche de +5 minutes. CPU, température externe et RAM utilisent la régression linéaire. "
+            "Le Wi-Fi utilise un lissage médian et une tendance locale amortie pour réduire l'effet "
+            "des fluctuations rapides du RSSI. Les valeurs prévues et réelles sont converties en "
+            "NORMAL/ANOMALIE avec les mêmes seuils que le dashboard."
         ),
         "overall": {
             "evaluations": total_evaluations,
