@@ -10,7 +10,8 @@ const WIFI_FORECAST_ROWS = 120;
 const WIFI_LOCAL_ROWS = 60;
 const WIFI_SMOOTHING_WINDOW = 5;
 const WIFI_RECENT_LEVEL_ROWS = 15;
-const WIFI_TREND_DAMPING = 0.5;
+const WIFI_DEGRADATION_DAMPING = 0.5;
+const WIFI_IMPROVEMENT_DAMPING = 0.25;
 const WIFI_MAX_TREND_PER_MINUTE = 1.0;
 
 async function getWifiSignalHistory(nodeName) {
@@ -105,8 +106,8 @@ function forecastWifiSignal(history) {
 
     // A rolling median removes short RSSI spikes without hiding the recent
     // signal level. The forecast is anchored on the recent median, which
-    // prevents the regression intercept from predicting a stronger signal
-    // while the measured RSSI is already weak.
+    // prevents the regression intercept from predicting a much stronger
+    // signal while the measured RSSI is already weak.
     const points = smoothWifiPoints(rawPoints);
     const meanX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
     const meanY = points.reduce((sum, point) => sum + point.y, 0) / points.length;
@@ -133,6 +134,14 @@ function forecastWifiSignal(history) {
         WIFI_MAX_TREND_PER_MINUTE
     );
 
+    // A temporary positive RSSI spike can look like a strong recovery.
+    // Improvements are therefore damped more than degradations.
+    const damping =
+        trendPerMinute > 0
+            ? WIFI_IMPROVEMENT_DAMPING
+            : WIFI_DEGRADATION_DAMPING;
+    const effectiveTrendPerMinute = trendPerMinute * damping;
+
     const recentValues = rawPoints
         .slice(-WIFI_RECENT_LEVEL_ROWS)
         .map((point) => point.y);
@@ -141,10 +150,7 @@ function forecastWifiSignal(history) {
     const forecast = [1, 2, 3, 4, 5].map((minutesAhead) => ({
         minutes_ahead: minutesAhead,
         value: Number(
-            (
-                recentLevel +
-                trendPerMinute * WIFI_TREND_DAMPING * minutesAhead
-            ).toFixed(2)
+            (recentLevel + effectiveTrendPerMinute * minutesAhead).toFixed(2)
         ),
     }));
 
@@ -153,9 +159,7 @@ function forecastWifiSignal(history) {
         current: Number(rawPoints[rawPoints.length - 1].y.toFixed(2)),
         smoothed_current: Number(recentLevel.toFixed(2)),
         predicted_5min: forecast[forecast.length - 1].value,
-        trend_per_minute: Number(
-            (trendPerMinute * WIFI_TREND_DAMPING).toFixed(4)
-        ),
+        trend_per_minute: Number(effectiveTrendPerMinute.toFixed(4)),
         raw_trend_per_minute: Number(rawTrendPerMinute.toFixed(4)),
         forecast,
         rows_used: localHistory.length,
