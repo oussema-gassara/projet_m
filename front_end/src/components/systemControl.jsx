@@ -160,6 +160,11 @@ export default function SystemControl({ nodeName = "esp32-1", testMode = false }
 
                         <hr />
                         <p>Fréquence du processeur : {system.cpu_frequency ?? "—"} MHz</p>
+                        <p>
+                            Performance CPU : {formatNumber(system.cpu_mips)} MIPS
+                            <br />
+                            <small>Benchmark NOP sur un cœur, mesuré au démarrage de l’ESP32.</small>
+                        </p>
                         <p>Nombre de cœurs : {system.cpu_cores ?? "—"}</p>
                         <p>Cœur actif : {system.active_core ?? "—"}</p>
 
