@@ -18,19 +18,6 @@ router.get("/test", (req, res) => {
 // toutes les 5 minutes pour éviter de remplir la base toutes
 // les 2 secondes pendant lesquelles l'ESP32 envoie ses mesures.
 function recordDanger(monitoringId, nodeName, dangerType, severity, sensorValue, thresholdValue, description, callback) {
-    const sql = `
-        SELECT id
-        FROM danger_history
-        WHERE danger_type = ?
-          AND severity = ?
-          AND JSON_EXTRACT(COALESCE(description, '{}'), '$.node_name') = ?
-          AND created_at >= NOW() - INTERVAL 5 MINUTE
-        ORDER BY id DESC
-        LIMIT 1
-    `;
-
-    // The existing description column is kept as human-readable text.
-    // Node filtering is therefore done with a simpler query below.
     const checkSql = `
         SELECT id
         FROM danger_history
@@ -281,6 +268,7 @@ router.post("/data", (req, res) => {
             used_ram,
             minimum_free_ram,
             cpu_frequency,
+            cpu_mips,
             cpu_cores,
             active_core,
             wifi_signal,
@@ -302,7 +290,7 @@ router.post("/data", (req, res) => {
             status
         )
         VALUES
-        (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `;
 
     const values = [
@@ -317,6 +305,7 @@ router.post("/data", (req, res) => {
         data.used_ram,
         data.minimum_free_ram,
         data.cpu_frequency,
+        data.cpu_mips,
         data.cpu_cores,
         data.active_core,
         data.wifi_signal,
