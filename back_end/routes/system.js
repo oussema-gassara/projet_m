@@ -31,6 +31,7 @@ router.get("/system", (req, res) => {
                 minimum_free_ram,
 
                 cpu_frequency,
+                cpu_mips,
                 cpu_cores,
                 active_core,
 
@@ -79,6 +80,7 @@ router.get("/system", (req, res) => {
                 minimum_free_ram,
 
                 cpu_frequency,
+                cpu_mips,
                 cpu_cores,
                 active_core,
 
