@@ -23,6 +23,9 @@ unsigned long lastSend = 0;
 unsigned long reconnectCount = 0;
 int lastHTTPResponse = 0;
 
+extern float cpuMips;
+float measureCpuMips();
+
 void startDiagnosticTask();
 void loadConfiguration();
 void saveConfiguration(const String &ssid, const String &password, const String &name);
@@ -52,6 +55,11 @@ void setup()
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, LOW);
     analogReadResolution(12);
+
+    cpuMips = measureCpuMips();
+    Serial.print("CPU Benchmark : ");
+    Serial.print(cpuMips, 2);
+    Serial.println(" MIPS (1 core, NOP)");
 
     loadConfiguration();
     startDiagnosticTask();
@@ -427,6 +435,7 @@ void sendData()
     json["used_ram"] = usedRAM;
     json["minimum_free_ram"] = minFreeRAM;
     json["cpu_frequency"] = cpuFrequency;
+    json["cpu_mips"] = cpuMips;
     json["cpu_cores"] = cpuCores;
     json["active_core"] = activeCore;
     json["wifi_signal"] = wifiRSSI;
